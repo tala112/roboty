@@ -20,42 +20,41 @@ export function StarBackground() {
       const area = canvas.width * canvas.height
       const starCount = Math.floor(area / 8000)
 
-      stars = Array.from({ length: starCount }, () => ({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        size: Math.random() * 2 + 0.5,
-        opacity: Math.random(),
-        speed: Math.random() * 0.02 + 0.005,
-        phase: Math.random() * Math.PI * 2,
-        drift: Math.random() * 0.1 - 0.05,
-        type: Math.random() < 0.1 ? "star" : "dot",
-      }))
+      stars = Array.from({ length: starCount }, () => {
+        const isStar = Math.random() < 0.02
+        return {
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          size: isStar ? Math.random() * 10 + 8 : Math.random() * 2 + 0.5,
+          opacity: isStar ? 1 : Math.random() * 0.3 + 0.2,
+          speed: isStar ? Math.random() * 0.002 + 0.0005 : Math.random() * 0.02 + 0.005,
+          phase: Math.random() * Math.PI * 2,
+          drift: Math.random() * 0.01 - 0.005,
+          type: isStar ? "star" : "dot",
+        }
+      })
     }
 
-    function drawStarShape(ctx, x, y, size, opacity) {
+    function drawStarShape(ctx, x, y, outerRadius, opacity) {
+      const spikes = 5
+      const innerRadius = outerRadius * 0.38
+
       ctx.save()
       ctx.translate(x, y)
-
-      const spikes = 4
-      const outer = size
-      const inner = size / 2
-
-      let rot = (Math.PI / 2) * 3
-      const step = Math.PI / spikes
+      ctx.rotate(-Math.PI / 2)
 
       ctx.beginPath()
-      ctx.moveTo(0, -outer)
-
-      for (let i = 0; i < spikes; i++) {
-        ctx.lineTo(Math.cos(rot) * outer, Math.sin(rot) * outer)
-        rot += step
-
-        ctx.lineTo(Math.cos(rot) * inner, Math.sin(rot) * inner)
-        rot += step
+      for (let i = 0; i < spikes * 2; i++) {
+        const radius = i % 2 === 0 ? outerRadius : innerRadius
+        const angle = (i * Math.PI) / spikes
+        const px = Math.cos(angle) * radius
+        const py = Math.sin(angle) * radius
+        if (i === 0) ctx.moveTo(px, py)
+        else ctx.lineTo(px, py)
       }
-
       ctx.closePath()
-      ctx.fillStyle = `rgba(255,255,255,${opacity})`
+
+      ctx.fillStyle = `rgb(255,255,255)`
       ctx.fill()
 
       ctx.restore()
@@ -84,28 +83,25 @@ export function StarBackground() {
         if (star.y < 0) star.y = canvas.height
         if (star.y > canvas.height) star.y = 0
 
-        // glow
-        const gradient = ctx.createRadialGradient(
-          star.x,
-          star.y,
-          0,
-          star.x,
-          star.y,
-          star.size * 3
-        )
-
-        gradient.addColorStop(0, `rgba(255,255,255,${opacity * 0.5})`)
-        gradient.addColorStop(1, "rgba(255,255,255,0)")
-
-        ctx.fillStyle = gradient
-        ctx.beginPath()
-        ctx.arc(star.x, star.y, star.size * 3, 0, Math.PI * 2)
-        ctx.fill()
-
         // shape
         if (star.type === "star") {
-          drawStarShape(ctx, star.x, star.y, star.size * 2, opacity)
+          drawStarShape(ctx, star.x, star.y, star.size, opacity)
         } else {
+          // small glow for dots only
+          const gradient = ctx.createRadialGradient(
+            star.x,
+            star.y,
+            0,
+            star.x,
+            star.y,
+            star.size * 2
+          )
+          gradient.addColorStop(0, `rgba(255,255,255,${opacity * 0.3})`)
+          gradient.addColorStop(1, "rgba(255,255,255,0)")
+          ctx.fillStyle = gradient
+          ctx.beginPath()
+          ctx.arc(star.x, star.y, star.size * 2, 0, Math.PI * 2)
+          ctx.fill()
           drawDot(star.x, star.y, star.size, opacity)
         }
       })
