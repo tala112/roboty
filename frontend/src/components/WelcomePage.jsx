@@ -19,15 +19,7 @@ export function WelcomePage({ onGoToChat }) {
           <RobotAvatar size="xl" animated={true} />
         </div>
 
-       {/*<div className="bottom-0 left-0 w-full z-0 ">
-         <img src="/ground.png" alt="gr" className="w-full h-auto object-cover absolute " />
-       </div>
-       <div className="absolute bottom-0 -bottom-6 left-0 right-0 z-0 pointer-events-none">
-      <img src="/ground.png" alt="gr" className="block w-full h-[180px] md:h-[220px] lg:h-[260px] object-cover object-bottom"/>
-      </div>*/}
-
-
-        <div className="absolute inset-0 flex items-center justify-center md:justify-end md:pr-20 p-6 z-20">
+          <div className="absolute inset-0 flex items-center justify-center md:justify-end md:pr-20 p-6 z-20">
           <div 
             className="w-full max-w-5xl rounded-[40px] p-8 md:p-12 xl:py-20 shadow-2xl transition-all"
             style={{ 
