@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { ThemeProvider } from "./theme-provider"
+import { ThemeProvider, useTheme } from "./theme-provider"
 import { StarBackground } from "./star-background"
 import { RobotAvatar } from "./robot-avatar"
 import { Button } from "./ui/button"
@@ -11,24 +11,45 @@ import {
   Search,
   Plus,
   MessageSquare,
+  X,
+  Sun,
+  Moon,
+  Check,
+  XCircle,
 } from "lucide-react"
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme()
+
+  const toggleTheme = () => {
+    setTheme(theme === "dark" ? "light" : "dark")
+  }
+
+  return (
+    <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-9 w-9">
+      {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+    </Button>
+  )
+}
 
 export function ChatPage({
   messages,
-  setMessages,
   message,
   setMessage,
   onClose,
   isLoading,
   handleSendMessage,
   handleNewChat,
-  RunCommand,
+  pendingCommand,
+  isConfirmMode,
+  handleConfirmExecution,
+  handleCancelExecution,
 }) {
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+  }, [messages, isConfirmMode])
 
   return (
     <ThemeProvider defaultTheme="dark">
@@ -38,7 +59,7 @@ export function ChatPage({
         <div className="relative z-10 flex h-full">
           
           {/* Sidebar */}
-          <div className="flex h-full w-72 flex-col border-r border-border bg-card/80 backdrop-blur-xl">
+          <div className="flex-none w-72 h-full flex-col border-r border-border bg-card/80 backdrop-blur-xl overflow-hidden">
             
             <div className="border-b border-border p-4">
               <div className="mb-4 flex items-center gap-3">
@@ -70,7 +91,7 @@ export function ChatPage({
               </Button>
             </div>
 
-            <ScrollArea className="flex-1 px-2">
+            <ScrollArea className="flex-1 overflow-auto px-2">
               <button className="w-full rounded-xl bg-secondary p-3 text-left hover:bg-secondary/80">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/20">
@@ -97,50 +118,85 @@ export function ChatPage({
           </div>
 
           {/* Main Chat Area */}
-          <div className="flex min-w-0 flex-1 flex-col">
-            
-            <div className="border-b border-border bg-card/50 p-4 backdrop-blur-xl">
-              <h2 className="text-lg font-bold">General Assistant</h2>
-              <p className="text-xs text-muted-foreground">AI Chat</p>
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex-none border-b border-border bg-card/50 p-4 backdrop-blur-xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold">General Assistant</h2>
+                  <p className="text-xs text-muted-foreground">AI Chat</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ThemeToggle />
+                  <Button variant="ghost" size="icon" onClick={onClose}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
 
-            <ScrollArea className="flex-1 p-4">
-              <div className="mx-auto max-w-4xl space-y-6">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex gap-3 ${
-                      msg.sender === "user" ? "flex-row-reverse" : ""
-                    }`}
-                  >
-                    {msg.sender === "bot" ? (
-                      <img src="/icon.png" alt="face" className="w-18 h-18 object-contain"/>
-                    ) : (
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/30">
-                        <User className="h-4 w-4 text-accent" />
-                      </div>
-                    )}
-
+            <ScrollArea className="flex-1 overflow-auto">
+              <div className="p-4">
+                <div className="mx-auto max-w-4xl space-y-4">
+                  {messages.map((msg) => (
                     <div
-                      className={`max-w-[75%] rounded-2xl px-4 py-3 ${
-                        msg.sender === "bot"
-                          ? "border border-border bg-card"
-                          : "bg-primary text-primary-foreground"
+                      key={msg.id}
+                      className={`flex gap-3 ${
+                        msg.sender === "user" ? "flex-row-reverse" : ""
                       }`}
                     >
-                      <p className="text-sm leading-relaxed">{msg.content}</p>
-                      <span className="mt-2 block text-xs opacity-70">
-                        {msg.timestamp}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                      {msg.sender === "bot" ? (
+                        <img src="/icon.png" alt="face" className="w-18 h-18 object-contain shrink-0"/>
+                      ) : (
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/30 shrink-0">
+                          <User className="h-4 w-4 text-accent" />
+                        </div>
+                      )}
 
-                <div ref={messagesEndRef} />
+                      <div
+                        className={`max-w-[75%] rounded-2xl px-4 py-3 ${
+                          msg.sender === "bot"
+                            ? "border border-border bg-card"
+                            : "bg-primary text-primary-foreground"
+                        }`}
+                      >
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                        <span className="mt-2 block text-xs opacity-70">
+                          {msg.timestamp}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
             </ScrollArea>
 
-            <div className="border-t border-border bg-card/50 p-4 backdrop-blur-xl">
+            {isConfirmMode && pendingCommand && (
+              <div className="flex-none absolute bottom-24 right-4 z-20 mx-4 max-w-[280px] rounded-lg border border-border bg-card p-3 shadow-lg">
+                <p className="text-sm mb-2">Execute this command?</p>
+                <code className="text-xs bg-secondary p-1 rounded block mb-3 break-all">{pendingCommand}</code>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleConfirmExecution}
+                    disabled={isLoading}
+                    className="h-8 text-xs bg-green-600 hover:bg-green-700"
+                  >
+                    <Check className="h-3 w-3 mr-1" />
+                    Confirm
+                  </Button>
+                  <Button
+                    onClick={handleCancelExecution}
+                    variant="outline"
+                    className="h-8 text-xs"
+                  >
+                    <XCircle className="h-3 w-3 mr-1" />
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex-none border-t border-border bg-card/50 p-4 backdrop-blur-xl">
               <div className="mx-auto flex max-w-4xl gap-2">
                 <Input
                   value={message}
