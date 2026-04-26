@@ -1,0 +1,6 @@
+# Database configuration for goose migrations
+
+command: migrate
+driver: sqlite3
+dsn: "roboty.db"
+migrations: internal/db/migrations

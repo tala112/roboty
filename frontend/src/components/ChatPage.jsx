@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ThemeProvider, useTheme } from "./theme-provider"
 import { StarBackground } from "./star-background"
 import { RobotAvatar } from "./robot-avatar"
@@ -16,6 +16,8 @@ import {
   Moon,
   Check,
   XCircle,
+  Trash2,
+  MoreVertical,
 } from "lucide-react"
 
 function ThemeToggle() {
@@ -32,6 +34,39 @@ function ThemeToggle() {
   )
 }
 
+// Format chat time for display
+function formatChatTime(dbTime) {
+  if (!dbTime) return "Now"
+  try {
+    const date = new Date(dbTime)
+    const now = new Date()
+    const diff = now - date
+    
+    // Less than 1 minute
+    if (diff < 60000) return "Just now"
+    // Less than 1 hour
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+    // Less than 24 hours
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
+    // Less than 7 days
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
+    // Otherwise show date
+    return date.toLocaleDateString()
+  } catch {
+    return "Now"
+  }
+}
+
+// Get chat title (first line of content)
+function getChatTitle(messages) {
+  if (!messages || messages.length === 0) return "Chat"
+  const firstUserMsg = messages.find(m => m.sender === 'user')
+  if (!firstUserMsg) return "Chat"
+  const content = firstUserMsg.content
+  if (content.length > 25) return content.substring(0, 25) + "..."
+  return content
+}
+
 export function ChatPage({
   messages,
   message,
@@ -44,12 +79,20 @@ export function ChatPage({
   isConfirmMode,
   handleConfirmExecution,
   handleCancelExecution,
+  chats = [],
+  currentChatId = null,
+  handleSelectChat = () => {},
+  handleDeleteChat = () => {},
 }) {
   const messagesEndRef = useRef(null)
+  const [showDeleteId, setShowDeleteId] = useState(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isConfirmMode])
+
+  const currentChat = chats.find(c => c.id === currentChatId)
+  const chatTitle = currentChat?.title || "Chat"
 
   return (
     <ThemeProvider defaultTheme="dark">
@@ -83,37 +126,64 @@ export function ChatPage({
 
             <div className="p-3">
               <Button
-  onClick={handleNewChat}
-  className="w-full gap-2"
->
-  <Plus className="h-4 w-4" />
-  New Chat
+                onClick={handleNewChat}
+                className="w-full gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                New Chat
               </Button>
             </div>
 
             <ScrollArea className="flex-1 overflow-auto px-2">
-              <button className="w-full rounded-xl bg-secondary p-3 text-left hover:bg-secondary/80">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/20">
-                    <MessageSquare className="h-5 w-5 text-accent" />
-                  </div>
+              <div className="space-y-1">
+                {chats.map((chat) => (
+                  <div
+                    key={chat.id}
+                    className={`group relative w-full rounded-xl p-3 text-left hover:bg-secondary/80 cursor-pointer transition-colors ${
+                      chat.id === currentChatId ? "bg-secondary" : ""
+                    }`}
+                    onClick={() => handleSelectChat(chat.id)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/20">
+                        <MessageSquare className="h-5 w-5 text-accent" />
+                      </div>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="truncate text-sm font-medium">
-                        General Assistant
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        Now
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="truncate text-sm font-medium">
+                            {chat.title || "Chat"}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatChatTime(chat.updated_at)}
+                          </span>
+                        </div>
+
+                        <p className="truncate text-xs text-muted-foreground">
+                          {chat.message_count} messages
+                        </p>
+                      </div>
                     </div>
 
-                    <p className="truncate text-xs text-muted-foreground">
-                      Start a conversation...
-                    </p>
+                    {/* Delete button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDeleteChat(chat.id)
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/20 rounded"
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </button>
                   </div>
-                </div>
-              </button>
+                ))}
+
+                {chats.length === 0 && (
+                  <div className="p-4 text-center text-muted-foreground text-sm">
+                    No chats yet. Start a new chat!
+                  </div>
+                )}
+              </div>
             </ScrollArea>
           </div>
 
@@ -122,7 +192,7 @@ export function ChatPage({
             <div className="flex-none border-b border-border bg-card/50 p-4 backdrop-blur-xl">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-bold">General Assistant</h2>
+                  <h2 className="text-lg font-bold">{chatTitle}</h2>
                   <p className="text-xs text-muted-foreground">AI Chat</p>
                 </div>
                 <div className="flex items-center gap-2">
