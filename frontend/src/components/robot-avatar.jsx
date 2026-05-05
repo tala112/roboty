@@ -92,22 +92,10 @@ export function RobotAvatar({ className, size = "md", animated = true }) {
         }
       `}</style>
 
-      {/* soft glow behind robot */}
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div
-          style={{
-            width: "42%",
-            height: "42%",
-            background:
-              "radial-gradient(circle at center, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.18) 45%, transparent 72%)",
-            filter: "blur(22px)",
-            borderRadius: "50%",
-          }}
-        />
-      </div>
+
 
       {/* shadow under robot */}
-      <div
+      {/*<div
         className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2"
         style={{
           width: "52%",
@@ -117,7 +105,7 @@ export function RobotAvatar({ className, size = "md", animated = true }) {
           filter: "blur(12px)",
           zIndex: 0,
         }}
-      />
+      />*/}
 
       <img
         src="/robot.png"

@@ -73,7 +73,7 @@ export function WelcomePage({ onGoToChat }) {
 import { ArrowRight, Check } from "lucide-react"
 import { StarBackground } from "./star-background"
 import { RobotAvatar } from "./robot-avatar"
-
+import { ThemeProvider } from "./theme-provider"
 export function WelcomePage({ onGoToChat }) {
   const features = [
     "Talk to your computer in natural language",
@@ -84,12 +84,12 @@ export function WelcomePage({ onGoToChat }) {
   ]
 
   return (
-    <div className="relative min-h-screen w-full overflow-x-hidden bg-[radial-gradient(circle_at_top,#171722_0%,#050508_45%,#020204_100%)] font-sans text-white">
+    <div className="relative min-h-screen w-full overflow-x-hidden bg-background font-sans">
       <div className="absolute inset-0">
         <StarBackground />
       </div>
 
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.04)_0%,transparent_30%,transparent_70%,rgba(255,255,255,0.03)_100%)]" />
+      <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent" />
 
       <div className="relative z-10 mx-auto flex h-screen w-full items-center px-4 py-6 sm:px-6 w-full">
         <div className="flex h-full w-full items-center gap-0 w-full">
@@ -97,14 +97,14 @@ export function WelcomePage({ onGoToChat }) {
           {/* LEFT CARD */}
           <div
             className=" 
-              relative overflow-hidden rounded-[32px] border border-white/10
-              bg-white/[0.06] p-4 shadow-[0_30px_80px_rgba(0,0,0,0.45)]
+              relative overflow-hidden rounded-[32px] border border-border/50
+              bg-welcome-card/60 p-4 shadow-xl
               backdrop-blur-xl sm:p-6 lg:p-8 
               lg:w-[66.67%] lg:max-h-[80vh]
             "
           >
-            <div className="pointer-events-none absolute -top-24 -left-24 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-24 -right-20 h-56 w-56 rounded-full bg-indigo-400/10 blur-3xl" />
+            <div className="pointer-events-none absolute -top-24 -left-24 h-56 w-56 rounded-full bg-accent/20 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-24 -right-20 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
 
             {/* Mobile top row: title + small avatar */}
             <div className="mb-4 flex items-start justify-between gap-4 lg:hidden">
@@ -128,18 +128,18 @@ export function WelcomePage({ onGoToChat }) {
               />
             </div>
 
-            <h1 className="max-w-xl text-balance text-[clamp(1.4rem,2.2vw,2.2rem)] font-light leading-tight text-white">
+            <h1 className="max-w-xl text-balance text-[clamp(1.4rem,2.2vw,2.2rem)] font-light leading-tight text-foreground">
               Welcome to Your{" "}
-              <span className="font-semibold text-white">Laptop Robot</span>.
+              <span className="font-semibold text-primary">Laptop Robot</span>.
             </h1>
 
-            <p className="mt-4 max-w-2xl text-[clamp(0.9rem,1.2vw,1rem)] leading-6 text-white/72">
+            <p className="mt-4 max-w-2xl text-[clamp(0.9rem,1.2vw,1rem)] leading-6 text-muted-foreground-welcome">
               Turn your laptop into an intelligent assistant that can understand,
               monitor, and help you control your system.
             </p>
 
             <div className="mt-6">
-              <h2 className="text-sm font-medium uppercase tracking-[0.22em] text-white/55">
+              <h2 className="text-sm font-medium uppercase tracking-[0.22em] text-muted-foreground-welcome/90">
                 This app helps you
               </h2>
 
@@ -147,10 +147,10 @@ export function WelcomePage({ onGoToChat }) {
                 {features.map((item, i) => (
                   <li
                     key={i}
-                    className="flex items-start gap-3 text-sm leading-5 text-white/70 sm:text-[0.9rem]"
+                    className="flex items-start gap-3 text-sm leading-5 text-foreground/100 sm:text-[0.9rem]"
                   >
-                    <span className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-white/5">
-                      <Check className="h-3.5 w-3.5 text-white/80" />
+                    <span className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full border border-border/30 bg-muted/30">
+                      <Check className="h-3.5 w-3.5 text-foreground/80" />
                     </span>
                     <span>{item}</span>
                   </li>
@@ -162,7 +162,7 @@ export function WelcomePage({ onGoToChat }) {
               <button
                 type="button"
                 onClick={onGoToChat}
-                className="bg-white text-black px-6 py-2.5 rounded-full font-bold hover:bg-gray-200 transition-all active:scale-95 shadow-lg flex items-center gap-2"
+                className="bg-primary text-primary-foreground px-6 py-2.5 rounded-full font-bold hover:bg-primary/90 transition-all active:scale-95 shadow-lg flex items-center gap-2"
               >
                 go to chat
                 <ArrowRight className="w-4 h-4" />
@@ -173,7 +173,7 @@ export function WelcomePage({ onGoToChat }) {
           {/* RIGHT SIDE AVATAR — ONLY LARGE SCREENS */}
           <div className="relative hidden items-center justify-center lg:flex lg:w-[33.33%] pointer-events-none">
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="h-[min(55vw,680px)] w-[min(55vw,680px)] rounded-full bg-white/5 blur-3xl" />
+              <div className="h-[min(25vw,680px)] w-[min(20vw,680px)] rounded-full bg-muted-foreground/30 blur-2xl" />
             </div>
 
             <div className="relative z-10 flex w-full justify-center pointer-events-none">
