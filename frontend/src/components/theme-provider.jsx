@@ -21,13 +21,15 @@ import { createContext, useContext, useEffect, useState } from "react"
 const ThemeContext = createContext()
 
 export function ThemeProvider({ children, defaultTheme = "dark" }) {
-  const [theme, setTheme] = useState(defaultTheme)
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem("theme") || defaultTheme
+  })
 
   useEffect(() => {
     const root = window.document.documentElement
-
     root.classList.remove("light", "dark")
     root.classList.add(theme)
+    localStorage.setItem("theme", theme)
   }, [theme])
 
   return (
