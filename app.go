@@ -435,7 +435,16 @@ func (a *App) ExecuteCommand(cmd string, approved bool) string {
 		return "Error: Command not approved. Please confirm execution first."
 	}
 
+	/*
 	out, err := exec.Command("cmd", "/C", cmd).CombinedOutput()
+	if err != nil {
+		return err.Error()
+	}
+	return string(out)*/
+
+
+
+	out, err := exec.Command("wsl", "bash", "-lc", cmd).CombinedOutput()
 	if err != nil {
 		return err.Error()
 	}
