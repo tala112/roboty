@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"Roboty/internal/db"
+	"Roboty/internal/modes"
 )
 
 // CommandPreview represents a preview of what a command will do
 type CommandPreview struct {
-	Command     string
-	IsDangerous bool
-	Message    string
+	Command     string `json:"command"`
+	IsDangerous bool   `json:"is_dangerous"`
+	Message    string `json:"message"`
 }
 
 // ChatInfo represents a chat for frontend
@@ -47,9 +48,10 @@ type MessageInfo struct {
 
 // App struct
 type App struct {
-	ctx      context.Context
-	database *db.DB
-	queries *db.Queries
+	ctx         context.Context
+	database    *db.DB
+	queries     *db.Queries
+	modeService *modes.ModeService
 }
 
 // NewApp creates a new App application struct
@@ -97,6 +99,11 @@ func (a *App) InitDatabase() error {
 	}
 	a.database = database
 	a.queries = db.NewQueries(database.DB())
+
+	a.modeService = modes.NewModeService(a.database, a.queries)
+	if err := a.modeService.InitFocusSchema(); err != nil {
+		log.Printf("[WARN] Failed to init focus schema: %v", err)
+	}
 
 	log.Println("[INFO] Database opened successfully")
 
@@ -173,6 +180,8 @@ func (a *App) InitDatabase() error {
 		}
 		log.Println("[INFO] Welcome chat created successfully")
 	}
+
+	a.modeService.CheckResumeSessions()
 
 	log.Println("[INFO] Database initialization complete")
 	return nil
@@ -456,13 +465,170 @@ func (a *App) RunCommand(cmd string) string {
 	return a.ExecuteCommand(cmd, true)
 }
 
+// GetSessionInfo returns session/chat info as JSON
+func (a *App) GetSessionInfo(chatID string) string {
+	chat, err := a.queries.GetChatByID(context.Background(), chatID)
+	if err != nil {
+		log.Printf("[ERROR] GetSessionInfo(%s): %v", chatID, err)
+		return "{}"
+	}
+	info := map[string]interface{}{
+		"title":            chat.Title,
+		"message_count":    chat.MessageCount,
+		"prompt_tokens":    chat.PromptTokens,
+		"completion_tokens": chat.CompletionTokens,
+		"cost":             chat.Cost,
+		"created_at":       chat.CreatedAt.String(),
+		"updated_at":       chat.UpdatedAt.String(),
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		log.Printf("[ERROR] GetSessionInfo(%s): marshal error: %v", chatID, err)
+		return "{}"
+	}
+	return string(data)
+}
+
+// GetSessionFiles returns file paths for a session as JSON array
+func (a *App) GetSessionFiles(chatID string) string {
+	files, err := a.queries.GetFilesByChatID(context.Background(), chatID)
+	if err != nil {
+		log.Printf("[ERROR] GetSessionFiles(%s): %v", chatID, err)
+		return "[]"
+	}
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.Path
+	}
+	data, err := json.Marshal(paths)
+	if err != nil {
+		log.Printf("[ERROR] GetSessionFiles(%s): marshal error: %v", chatID, err)
+		return "[]"
+	}
+	return string(data)
+}
+
 // startup is called when the app starts. The context is saved
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if a.modeService != nil {
+		a.modeService.SetContext(ctx)
+	}
 }
 
 // Greet returns a greeting for the given name
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
+}
+
+// ============================================================
+// Focus Modes API
+// ============================================================
+
+// ListModes returns all focus modes
+func (a *App) ListModes() (string, error) {
+	modes, err := a.modeService.ListModes()
+	if err != nil {
+		return "[]", err
+	}
+	data, _ := json.Marshal(modes)
+	return string(data), nil
+}
+
+// CreateMode creates a new focus mode
+func (a *App) CreateMode(name, description string, durationMinutes int, muteNotifications bool, icon, color string, appsJSON string) (string, error) {
+	var apps []modes.FocusModeApp
+	if appsJSON != "" {
+		if err := json.Unmarshal([]byte(appsJSON), &apps); err != nil {
+			return "", fmt.Errorf("invalid apps JSON: %w", err)
+		}
+	}
+	mode, err := a.modeService.CreateMode(modes.CreateModeRequest{
+		Name:             name,
+		Description:      description,
+		DurationMinutes:  durationMinutes,
+		MuteNotifications: muteNotifications,
+		Icon:             icon,
+		Color:            color,
+		Apps:             apps,
+	})
+	if err != nil {
+		return "", err
+	}
+	data, _ := json.Marshal(mode)
+	return string(data), nil
+}
+
+// UpdateMode updates an existing focus mode
+func (a *App) UpdateMode(id, name, description string, durationMinutes int, muteNotifications, enabled bool, icon, color string, appsJSON string) (string, error) {
+	var apps []modes.FocusModeApp
+	if appsJSON != "" {
+		if err := json.Unmarshal([]byte(appsJSON), &apps); err != nil {
+			return "", fmt.Errorf("invalid apps JSON: %w", err)
+		}
+	}
+	mode, err := a.modeService.UpdateMode(id, modes.UpdateModeRequest{
+		Name:             name,
+		Description:      description,
+		DurationMinutes:  durationMinutes,
+		MuteNotifications: muteNotifications,
+		Enabled:          enabled,
+		Icon:             icon,
+		Color:            color,
+		Apps:             apps,
+	})
+	if err != nil {
+		return "", err
+	}
+	data, _ := json.Marshal(mode)
+	return string(data), nil
+}
+
+// DeleteMode deletes a focus mode
+func (a *App) DeleteMode(id string) error {
+	return a.modeService.DeleteMode(id)
+}
+
+// ToggleMode enables or disables a focus mode
+func (a *App) ToggleMode(id string, enabled bool) error {
+	return a.modeService.ToggleMode(id, enabled)
+}
+
+// GetInstalledApps returns all installed applications
+func (a *App) GetInstalledApps() (string, error) {
+	apps, err := a.modeService.GetInstalledApps()
+	if err != nil {
+		return "[]", err
+	}
+	data, _ := json.Marshal(apps)
+	return string(data), nil
+}
+
+// ActivateMode activates a focus mode immediately
+func (a *App) ActivateMode(modeID string) (string, error) {
+	session, err := a.modeService.ActivateMode(modeID)
+	if err != nil {
+		return "", err
+	}
+	data, _ := json.Marshal(session)
+	return string(data), nil
+}
+
+// DeactivateMode deactivates an active session
+func (a *App) DeactivateMode(sessionID string) error {
+	return a.modeService.DeactivateMode(sessionID)
+}
+
+// GetActiveSession returns the currently active session if any
+func (a *App) GetActiveSession() (string, error) {
+	session, err := a.modeService.GetActiveSession()
+	if err != nil {
+		return "", err
+	}
+	if session == nil {
+		return "", nil
+	}
+	data, _ := json.Marshal(session)
+	return string(data), nil
 }

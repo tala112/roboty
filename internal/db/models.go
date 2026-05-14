@@ -78,6 +78,75 @@ type ReadFile struct {
 	ReadAt DateTime `json:"read_at" db:"read_at"`
 }
 
+type FocusMode struct {
+	ID                 string   `json:"id" db:"id"`
+	Name              string   `json:"name" db:"name"`
+	Description       string   `json:"description" db:"description"`
+	DurationMinutes   int      `json:"duration_minutes" db:"duration_minutes"`
+	MuteNotifications bool     `json:"mute_notifications" db:"mute_notifications"`
+	Enabled           bool     `json:"enabled" db:"enabled"`
+	Icon              string   `json:"icon" db:"icon"`
+	Color             string   `json:"color" db:"color"`
+	CreatedAt         DateTime `json:"created_at" db:"created_at"`
+	UpdatedAt         DateTime `json:"updated_at" db:"updated_at"`
+}
+
+type FocusModeApp struct {
+	ID               string `json:"id" db:"id"`
+	ModeID          string `json:"mode_id" db:"mode_id"`
+	AppName         string `json:"app_name" db:"app_name"`
+	AppExec         string `json:"app_exec" db:"app_exec"`
+	CloseOnActivate bool   `json:"close_on_activate" db:"close_on_activate"`
+	CreatedAt       string `json:"created_at" db:"created_at"`
+}
+
+type FocusModeSession struct {
+	ID         string   `json:"id" db:"id"`
+	ModeID    string   `json:"mode_id" db:"mode_id"`
+	StartedAt  DateTime `json:"started_at" db:"started_at"`
+	EndsAt    *DateTime `json:"ends_at,omitempty" db:"ends_at"`
+	FinishedAt *DateTime `json:"finished_at,omitempty" db:"finished_at"`
+	Status    string   `json:"status" db:"status"`
+	CreatedAt DateTime `json:"created_at" db:"created_at"`
+}
+
+type CreateFocusModeParams struct {
+	ID               string
+	Name             string
+	Description      string
+	DurationMinutes  int
+	MuteNotifications bool
+	Enabled          bool
+	Icon             string
+	Color            string
+}
+
+type UpdateFocusModeParams struct {
+	ID                string
+	Name             string
+	Description      string
+	DurationMinutes   int
+	MuteNotifications bool
+	Enabled          bool
+	Icon             string
+	Color            string
+}
+
+type CreateFocusModeAppParams struct {
+	ID               string
+	ModeID          string
+	AppName         string
+	AppExec         string
+	CloseOnActivate bool
+}
+
+type CreateFocusSessionParams struct {
+	ID       string
+	ModeID  string
+	EndsAt  *string
+	Status  string
+}
+
 type ChatWithMessages struct {
 	Chat     Chat
 	Messages []Message

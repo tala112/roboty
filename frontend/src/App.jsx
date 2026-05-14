@@ -2,10 +2,13 @@ import { useState, useEffect } from "react"
 import { ThemeProvider } from "./components/theme-provider"
 import { WelcomePage } from "./components/WelcomePage"
 import { ChatPage } from "./components/ChatPage"
-import { RunCommand, PreviewCommand, ExecuteCommand, InitDatabase, GetChats, GetActiveChat, GetChatMessages, SaveMessage, CreateChat, DeleteChat } from "../wailsjs/go/main/App"
+import { SettingsPage } from "./components/SettingsPage"
+import { PreviewCommand, ExecuteCommand, InitDatabase, GetChats, GetActiveChat, GetChatMessages, SaveMessage, CreateChat, DeleteChat } from "../wailsjs/go/main/App"
+import { PermissionModal } from "./components/PermissionModal"
 
 export default function App() {
   const [showChat, setShowChat] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [isDbReady, setIsDbReady] = useState(false)
   
   const [chats, setChats] = useState([])
@@ -17,6 +20,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [pendingCommand, setPendingCommand] = useState(null)
   const [isConfirmMode, setIsConfirmMode] = useState(false)
+  const [pendingCommandDangerous, setPendingCommandDangerous] = useState(false)
 
   // Extract text from JSON content
   const extractText = (content) => {
@@ -214,22 +218,13 @@ export default function App() {
     }
     setMsgListFrontend([...msgListFrontend, userMsgObj])
     
-    // Check command safety
+    // Always ask for confirmation before executing
     try {
       const preview = await PreviewCommand(userCmd)
+
       setPendingCommand(userCmd)
+      setPendingCommandDangerous(preview.is_dangerous)
       setIsConfirmMode(true)
-      
-      // Add preview message to UI
-      const previewMsg = {
-        id: userMsgId + "-preview",
-        content: preview.is_dangerous ? "⛔ Command blocked for security" : "⏳ Executing command...",
-        sender: "bot",
-        timestamp: now,
-        isConfirm: true,
-        isBlocked: preview.is_dangerous,
-      }
-      setMsgListFrontend(prev => [...prev, previewMsg])
     } catch (err) {
       console.error("Preview error:", err)
     }
@@ -238,6 +233,7 @@ export default function App() {
   const handleConfirmExecution = async () => {
     if (!pendingCommand) return
     setIsConfirmMode(false)
+    setPendingCommandDangerous(false)
     
     try {
       // Execute the command
@@ -281,6 +277,7 @@ export default function App() {
     }
     
     setPendingCommand(null)
+    setPendingCommandDangerous(false)
     setIsConfirmMode(false)
   }
 
@@ -288,9 +285,26 @@ export default function App() {
     setShowChat(true)
   }
 
+  const onGoToSettings = () => {
+    setShowSettings(true)
+  }
+
+  const onBackFromSettings = () => {
+    setShowSettings(false)
+  }
+
   return (
     <ThemeProvider defaultTheme="dark">
-      {showChat ? (
+      <PermissionModal
+        isOpen={isConfirmMode && !!pendingCommand}
+        command={pendingCommand}
+        isDangerous={pendingCommandDangerous}
+        onAllow={handleConfirmExecution}
+        onDeny={handleCancelExecution}
+      />
+      {showSettings ? (
+        <SettingsPage onBack={onBackFromSettings} />
+      ) : showChat ? (
         <ChatPage
           messages={msgListFrontend}
           message={message}
@@ -299,14 +313,11 @@ export default function App() {
           onClose={() => setShowChat(false)}
           handleNewChat={handleNewChat}
           isLoading={isLoading}
-          pendingCommand={pendingCommand}
-          isConfirmMode={isConfirmMode}
-          handleConfirmExecution={handleConfirmExecution}
-          handleCancelExecution={handleCancelExecution}
           chats={chats}
           currentChatId={currentChatId}
           handleSelectChat={handleSelectChat}
           handleDeleteChat={handleDeleteChat}
+          onGoToSettings={onGoToSettings}
         />
       ) : (
         <WelcomePage onGoToChat={onGoToChat} />

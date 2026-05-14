@@ -23,9 +23,9 @@ export namespace main {
 	    }
 	}
 	export class CommandPreview {
-	    Command: string;
-	    IsDangerous: boolean;
-	    Message: string;
+	    command: string;
+	    is_dangerous: boolean;
+	    message: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CommandPreview(source);
@@ -33,9 +33,9 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Command = source["Command"];
-	        this.IsDangerous = source["IsDangerous"];
-	        this.Message = source["Message"];
+	        this.command = source["command"];
+	        this.is_dangerous = source["is_dangerous"];
+	        this.message = source["message"];
 	    }
 	}
 	export class MessageInfo {
