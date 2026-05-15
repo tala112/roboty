@@ -6,12 +6,20 @@ export function ActivateMode(arg1) {
   return window['go']['main']['App']['ActivateMode'](arg1);
 }
 
+export function AddAllowedApp(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['AddAllowedApp'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function CheckAppOnPC(arg1) {
+  return window['go']['main']['App']['CheckAppOnPC'](arg1);
+}
+
 export function CreateChat(arg1) {
   return window['go']['main']['App']['CreateChat'](arg1);
 }
 
-export function CreateMode(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
-  return window['go']['main']['App']['CreateMode'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+export function CreateMode(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+  return window['go']['main']['App']['CreateMode'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
 export function DeactivateMode(arg1) {
@@ -38,6 +46,10 @@ export function GetActiveSession() {
   return window['go']['main']['App']['GetActiveSession']();
 }
 
+export function GetAllDetectableApps() {
+  return window['go']['main']['App']['GetAllDetectableApps']();
+}
+
 export function GetChatMessages(arg1) {
   return window['go']['main']['App']['GetChatMessages'](arg1);
 }
@@ -56,6 +68,10 @@ export function GetSessionFiles(arg1) {
 
 export function GetSessionInfo(arg1) {
   return window['go']['main']['App']['GetSessionInfo'](arg1);
+}
+
+export function GetURLBlockerStatus() {
+  return window['go']['main']['App']['GetURLBlockerStatus']();
 }
 
 export function Greet(arg1) {
@@ -90,6 +106,6 @@ export function UpdateChatTitle(arg1, arg2) {
   return window['go']['main']['App']['UpdateChatTitle'](arg1, arg2);
 }
 
-export function UpdateMode(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
-  return window['go']['main']['App']['UpdateMode'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
+export function UpdateMode(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) {
+  return window['go']['main']['App']['UpdateMode'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
 }

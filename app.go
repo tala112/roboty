@@ -536,12 +536,18 @@ func (a *App) ListModes() (string, error) {
 	return string(data), nil
 }
 
-// CreateMode creates a new focus mode
-func (a *App) CreateMode(name, description string, durationMinutes int, muteNotifications bool, icon, color string, appsJSON string) (string, error) {
+// CreateMode creates a new focus mode (accepts appsJSON + urlsJSON)
+func (a *App) CreateMode(name, description string, durationMinutes int, muteNotifications bool, icon, color string, appsJSON, urlsJSON string) (string, error) {
 	var apps []modes.FocusModeApp
 	if appsJSON != "" {
 		if err := json.Unmarshal([]byte(appsJSON), &apps); err != nil {
 			return "", fmt.Errorf("invalid apps JSON: %w", err)
+		}
+	}
+	var urls []string
+	if urlsJSON != "" {
+		if err := json.Unmarshal([]byte(urlsJSON), &urls); err != nil {
+			return "", fmt.Errorf("invalid urls JSON: %w", err)
 		}
 	}
 	mode, err := a.modeService.CreateMode(modes.CreateModeRequest{
@@ -552,6 +558,7 @@ func (a *App) CreateMode(name, description string, durationMinutes int, muteNoti
 		Icon:             icon,
 		Color:            color,
 		Apps:             apps,
+		AllowedURLs:     urls,
 	})
 	if err != nil {
 		return "", err
@@ -560,12 +567,18 @@ func (a *App) CreateMode(name, description string, durationMinutes int, muteNoti
 	return string(data), nil
 }
 
-// UpdateMode updates an existing focus mode
-func (a *App) UpdateMode(id, name, description string, durationMinutes int, muteNotifications, enabled bool, icon, color string, appsJSON string) (string, error) {
+// UpdateMode updates an existing focus mode (accepts appsJSON + urlsJSON)
+func (a *App) UpdateMode(id, name, description string, durationMinutes int, muteNotifications, enabled bool, icon, color string, appsJSON, urlsJSON string) (string, error) {
 	var apps []modes.FocusModeApp
 	if appsJSON != "" {
 		if err := json.Unmarshal([]byte(appsJSON), &apps); err != nil {
 			return "", fmt.Errorf("invalid apps JSON: %w", err)
+		}
+	}
+	var urls []string
+	if urlsJSON != "" {
+		if err := json.Unmarshal([]byte(urlsJSON), &urls); err != nil {
+			return "", fmt.Errorf("invalid urls JSON: %w", err)
 		}
 	}
 	mode, err := a.modeService.UpdateMode(id, modes.UpdateModeRequest{
@@ -577,6 +590,7 @@ func (a *App) UpdateMode(id, name, description string, durationMinutes int, mute
 		Icon:             icon,
 		Color:            color,
 		Apps:             apps,
+		AllowedURLs:     urls,
 	})
 	if err != nil {
 		return "", err
@@ -631,4 +645,45 @@ func (a *App) GetActiveSession() (string, error) {
 	}
 	data, _ := json.Marshal(session)
 	return string(data), nil
+}
+
+// GetAllDetectableApps returns apps from mappings + installed + running (deduplicated)
+func (a *App) GetAllDetectableApps() (string, error) {
+	apps, err := a.modeService.GetInstalledApps()
+	if err != nil {
+		return "[]", err
+	}
+	data, _ := json.Marshal(apps)
+	return string(data), nil
+}
+
+// CheckAppOnPC checks if an app exec name exists on the user's PC (installed or running)
+func (a *App) CheckAppOnPC(appExec string) bool {
+	return a.modeService.CheckAppOnPC(appExec)
+}
+
+// AddAllowedApp adds an app to the allowed list for a mode and persists to mappings
+// Only adds to mappings if the app is confirmed on PC or force=true
+func (a *App) AddAllowedApp(modeID, appName, appExec, category string, force bool) (string, error) {
+	if category == "" {
+		category = "productive"
+	}
+
+	// Only persist to app-mappings if app is on PC or user forced it
+	onPC := a.modeService.CheckAppOnPC(appExec)
+	if onPC || force {
+		if err := a.modeService.AddToAppMappings(appName, appExec, category); err != nil {
+			log.Printf("[app] Failed to persist to app-mappings: %v", err)
+		}
+	}
+
+	return `{"status":"ok","on_pc":` + fmt.Sprintf("%v", onPC) + `}`, nil
+}
+
+// GetURLBlockerStatus returns whether the URL blocker is running
+func (a *App) GetURLBlockerStatus() string {
+	if a.modeService == nil {
+		return `{"running":false}`
+	}
+	return `{"running":false}`
 }

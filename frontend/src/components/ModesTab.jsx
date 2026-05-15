@@ -54,6 +54,25 @@ export function ModesTab() {
     loadModes()
   }, [loadModes])
 
+  // Poll for session expiry — auto-stop when backend timer expires
+  useEffect(() => {
+    if (!activeSession) return
+    const interval = setInterval(async () => {
+      try {
+        const { modesService } = await import("../services/modes")
+        const session = await modesService.getActiveSession()
+        if (!session) {
+          setActiveSession(null)
+          setActiveMode(null)
+          loadModes()
+        }
+      } catch {
+        // ignore
+      }
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [activeSession, loadModes])
+
   const handleCreate = () => {
     setEditMode(null)
     setShowForm(true)

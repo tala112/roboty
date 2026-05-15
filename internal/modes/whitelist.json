@@ -1,0 +1,136 @@
+{
+  "macos": {
+    "bundle_ids": [
+      "com.apple.loginwindow",
+      "com.apple.SecurityAgent",
+      "com.apple.finder",
+      "com.apple.dock",
+      "com.apple.SystemUIServer",
+      "com.apple.controlcenter",
+      "com.apple.notificationcenterui",
+      "com.apple.WindowManager",
+      "com.apple.launchd",
+      "com.apple.spotlight",
+      "com.apple.SystemSettings",
+      "com.apple.SoftwareUpdate",
+      "com.apple.backupd",
+      "com.apple.networkd",
+      "com.apple.WiFiAgent",
+      "com.apple.VoiceOverUtility"
+    ],
+
+    "ui_shell": [
+      "com.apple.spotlight",
+      "com.apple.SystemUIServer",
+      "com.apple.controlcenter",
+      "com.apple.notificationcenterui",
+      "com.apple.dock",
+      "com.apple.WindowManager"
+    ],
+
+    "process_names": [
+      "Finder",
+      "Dock",
+      "SystemUIServer",
+      "ControlCenter",
+      "NotificationCenter",
+      "Spotlight",
+      "WindowManager"
+    ]
+  },
+
+  "windows": {
+    "executables": [
+      "explorer.exe",
+      "dwm.exe",
+      "csrss.exe",
+      "winlogon.exe",
+      "wininit.exe",
+      "lsass.exe",
+      "services.exe",
+      "svchost.exe",
+      "RuntimeBroker.exe",
+      "taskhostw.exe",
+      "ShellExperienceHost.exe",
+      "StartMenuExperienceHost.exe",
+      "SearchHost.exe",
+      "SearchApp.exe",
+      "SearchIndexer.exe",
+      "SearchProtocolHost.exe",
+      "SearchFilterHost.exe",
+      "SystemSettings.exe",
+      "LogonUI.exe",
+      "lsm.exe",
+      "smartscreen.exe",
+      "ApplicationFrameHost.exe",
+      "TextInputHost.exe",
+      "taskmgr.exe"
+    ],
+
+    "ui_shell": [
+      "StartMenuExperienceHost.exe",
+      "SearchHost.exe",
+      "SearchApp.exe",
+      "explorer.exe",
+      "ShellExperienceHost.exe"
+    ]
+  },
+
+  "linux": {
+    "executables": [
+      "systemd",
+      "systemd-logind",
+      "systemd-journald",
+      "systemd-networkd",
+      "systemd-resolved",
+      "dbus-daemon",
+      "NetworkManager",
+      "wpa_supplicant",
+      "polkitd",
+      "udevd",
+      "systemd-udevd",
+      "gnome-shell",
+      "mutter",
+      "kwin",
+      "plasmashell",
+      "Xorg",
+      "Xwayland",
+      "wayland",
+      "pipewire",
+      "pipewire-pulse",
+      "pulseaudio",
+      "wireplumber",
+      "lightdm",
+      "gdm",
+      "sddm",
+      "login",
+      "sshd",
+      "init",
+      "kthreadd",
+      "kworker"
+    ],
+
+    "ui_shell": [
+      "gnome-shell",
+      "plasmashell",
+      "mutter",
+      "kwin"
+    ],
+
+    "search_ui": [
+      "gnome-shell",
+      "KRunner",
+      "activities",
+      "overview"
+    ]
+  },
+
+  "kernel_level": [
+    "kernel",
+    "swapper",
+    "migration",
+    "ksoftirqd",
+    "kworker",
+    "kthreadd"
+  ]
+}

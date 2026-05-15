@@ -7,30 +7,6 @@ import (
 	"strings"
 )
 
-func BlockApps(apps []string) {
-	if len(apps) == 0 {
-		return
-	}
-	switch runtime.GOOS {
-	case "linux":
-		blockAppsLinux(apps)
-	case "windows":
-		blockAppsWindows(apps)
-	}
-}
-
-func UnblockApps(apps []string) {
-	if len(apps) == 0 {
-		return
-	}
-	switch runtime.GOOS {
-	case "linux":
-		unblockAppsLinux(apps)
-	case "windows":
-		unblockAppsWindows(apps)
-	}
-}
-
 func CloseApps(apps []string) {
 	if len(apps) == 0 {
 		return
@@ -40,48 +16,39 @@ func CloseApps(apps []string) {
 		closeAppsLinux(apps)
 	case "windows":
 		closeAppsWindows(apps)
+	case "darwin":
+		closeAppsMacOS(apps)
 	}
 }
 
-func blockAppsLinux(apps []string) {
-	for _, app := range apps {
-		cmd := exec.Command("pkill", "-STOP", app)
-		if err := cmd.Run(); err != nil {
-			log.Printf("[modes] block %s (STOP): %v", app, err)
-		}
-	}
-}
-
-func unblockAppsLinux(apps []string) {
-	for _, app := range apps {
-		cmd := exec.Command("pkill", "-CONT", app)
-		if err := cmd.Run(); err != nil {
-			log.Printf("[modes] unblock %s (CONT): %v", app, err)
-		}
-	}
+func CloseApp(appExec string) {
+	CloseApps([]string{appExec})
 }
 
 func closeAppsLinux(apps []string) {
 	for _, app := range apps {
 		cmd := exec.Command("pkill", "-TERM", app)
-		cmd.Run()
+		if err := cmd.Run(); err != nil {
+			log.Printf("[blocking] close %s: %v", app, err)
+		}
 	}
-}
-
-func blockAppsWindows(apps []string) {
-	for _, app := range apps {
-		cmd := exec.Command("taskkill", "/F", "/IM", app+".exe")
-		_ = cmd.Run()
-	}
-}
-
-func unblockAppsWindows(_ []string) {
 }
 
 func closeAppsWindows(apps []string) {
 	for _, app := range apps {
 		cmd := exec.Command("taskkill", "/F", "/IM", app+".exe")
-		_ = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			log.Printf("[blocking] close %s: %v", app, err)
+		}
+	}
+}
+
+func closeAppsMacOS(apps []string) {
+	for _, app := range apps {
+		cmd := exec.Command("pkill", "-TERM", app)
+		if err := cmd.Run(); err != nil {
+			log.Printf("[blocking] close %s: %v", app, err)
+		}
 	}
 }
 
@@ -91,6 +58,8 @@ func isAppRunning(execName string) bool {
 		return isProcessRunningLinux(execName)
 	case "windows":
 		return isProcessRunningWindows(execName)
+	case "darwin":
+		return isProcessRunningMacOS(execName)
 	}
 	return false
 }
@@ -105,4 +74,10 @@ func isProcessRunningWindows(execName string) bool {
 	cmd := exec.Command("tasklist", "/FI", "IMAGENAME eq "+execName+".exe")
 	out, err := cmd.Output()
 	return err == nil && strings.Contains(string(out), execName+".exe")
+}
+
+func isProcessRunningMacOS(execName string) bool {
+	cmd := exec.Command("pgrep", "-x", execName)
+	out, err := cmd.Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
 }

@@ -53,6 +53,47 @@ func getLinuxApps() ([]InstalledApp, error) {
 			apps = append(apps, app)
 		}
 	}
+	for _, app := range apps {
+	println("[APP]", app.Name, "=>", app.Exec)
+	}
+	return apps, nil
+}
+
+func getWindowsApps() ([]InstalledApp, error) {
+	var apps []InstalledApp
+	startMenuDirs := []string{
+		filepath.Join(os.Getenv("ProgramData"), "Microsoft", "Windows", "Start Menu", "Programs"),
+		filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs"),
+	}
+	seen := make(map[string]bool)
+	for _, dir := range startMenuDirs {
+		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != ".lnk" {
+				return nil
+			}
+			appName := strings.TrimSuffix(d.Name(), ".lnk")
+			appExec := strings.ToLower(appName)
+			if seen[appExec] {
+				return nil
+			}
+			seen[appExec] = true
+			apps = append(apps, InstalledApp{
+				Name: appName,
+				Exec: appExec,
+			})
+			return nil
+		})
+		if err != nil {
+			continue
+		}
+	}
+	for _, app := range apps {
+	println("[APP]", app.Name, "=>", app.Exec)
+	}
 	return apps, nil
 }
 
@@ -112,41 +153,6 @@ func parseDesktopFile(path string) (InstalledApp, bool) {
 		return InstalledApp{}, false
 	}
 	return InstalledApp{Name: name, Exec: execCmd}, true
-}
-
-func getWindowsApps() ([]InstalledApp, error) {
-	var apps []InstalledApp
-	startMenuDirs := []string{
-		filepath.Join(os.Getenv("ProgramData"), "Microsoft", "Windows", "Start Menu", "Programs"),
-		filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs"),
-	}
-	seen := make(map[string]bool)
-	for _, dir := range startMenuDirs {
-		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			ext := strings.ToLower(filepath.Ext(path))
-			if ext != ".lnk" {
-				return nil
-			}
-			appName := strings.TrimSuffix(d.Name(), ".lnk")
-			appExec := strings.ToLower(appName)
-			if seen[appExec] {
-				return nil
-			}
-			seen[appExec] = true
-			apps = append(apps, InstalledApp{
-				Name: appName,
-				Exec: appExec,
-			})
-			return nil
-		})
-		if err != nil {
-			continue
-		}
-	}
-	return apps, nil
 }
 
 func dirExists(path string) bool {

@@ -52,6 +52,7 @@ export function ChatPage({
   setMessage,
   onClose,
   isLoading,
+  isConfirmMode,
   handleSendMessage,
   handleNewChat,
   chats = [],
@@ -65,7 +66,7 @@ export function ChatPage({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+  }, [messages,isConfirmMode])
 
   const currentChat = chats.find((c) => c.id === currentChatId)
   const chatTitle = currentChat?.title || "Chat"

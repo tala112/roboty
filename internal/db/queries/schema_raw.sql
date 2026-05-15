@@ -159,3 +159,17 @@ AFTER UPDATE ON focus_modes
 BEGIN
     UPDATE focus_modes SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
+
+-- Allowed URLs for focus mode (whitelist)
+CREATE TABLE IF NOT EXISTS focus_mode_urls (
+    id TEXT PRIMARY KEY,
+    mode_id TEXT NOT NULL REFERENCES focus_modes(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(mode_id, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_focus_mode_urls_mode_id ON focus_mode_urls(mode_id);
+
+-- Add is_allowed column to focus_mode_apps (migration-compatible)
+ALTER TABLE focus_mode_apps ADD COLUMN is_allowed INTEGER DEFAULT 0;

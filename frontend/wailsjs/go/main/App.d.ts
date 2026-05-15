@@ -4,9 +4,13 @@ import {main} from '../models';
 
 export function ActivateMode(arg1:string):Promise<string>;
 
+export function AddAllowedApp(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<string>;
+
+export function CheckAppOnPC(arg1:string):Promise<boolean>;
+
 export function CreateChat(arg1:string):Promise<main.ChatInfo>;
 
-export function CreateMode(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:string,arg7:string):Promise<string>;
+export function CreateMode(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:string,arg7:string,arg8:string):Promise<string>;
 
 export function DeactivateMode(arg1:string):Promise<void>;
 
@@ -20,6 +24,8 @@ export function GetActiveChat():Promise<main.ChatInfo>;
 
 export function GetActiveSession():Promise<string>;
 
+export function GetAllDetectableApps():Promise<string>;
+
 export function GetChatMessages(arg1:string):Promise<Array<main.MessageInfo>>;
 
 export function GetChats():Promise<Array<main.ChatInfo>>;
@@ -29,6 +35,8 @@ export function GetInstalledApps():Promise<string>;
 export function GetSessionFiles(arg1:string):Promise<string>;
 
 export function GetSessionInfo(arg1:string):Promise<string>;
+
+export function GetURLBlockerStatus():Promise<string>;
 
 export function Greet(arg1:string):Promise<string>;
 
@@ -46,4 +54,4 @@ export function ToggleMode(arg1:string,arg2:boolean):Promise<void>;
 
 export function UpdateChatTitle(arg1:string,arg2:string):Promise<void>;
 
-export function UpdateMode(arg1:string,arg2:string,arg3:string,arg4:number,arg5:boolean,arg6:boolean,arg7:string,arg8:string,arg9:string):Promise<string>;
+export function UpdateMode(arg1:string,arg2:string,arg3:string,arg4:number,arg5:boolean,arg6:boolean,arg7:string,arg8:string,arg9:string,arg10:string):Promise<string>;

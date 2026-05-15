@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,19 +14,26 @@ import (
 )
 
 type ModeService struct {
-	database *db.DB
-	queries  *db.Queries
-	ctx      context.Context
-	mu       sync.Mutex
-	timers   map[string]*time.Timer
-	notifMuted bool
+	database     *db.DB
+	queries     *db.Queries
+	ctx         context.Context
+	mu          sync.Mutex
+	timers      map[string]*time.Timer
+	notifMuted  bool
+	tracker     *ForegroundTracker
+	appBlocker  *AppBlocker
+	urlBlocker  *URLBlocker
 }
 
 func NewModeService(database *db.DB, queries *db.Queries) *ModeService {
+	tracker := NewForegroundTracker()
 	return &ModeService{
-		database: database,
-		queries:  queries,
-		timers:   make(map[string]*time.Timer),
+		database:    database,
+		queries:    queries,
+		timers:     make(map[string]*time.Timer),
+		tracker:    tracker,
+		appBlocker: NewAppBlocker(tracker),
+		urlBlocker: NewURLBlocker(),
 	}
 }
 
@@ -34,51 +42,28 @@ func (s *ModeService) SetContext(ctx context.Context) {
 }
 
 func (s *ModeService) InitFocusSchema() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS focus_modes (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		description TEXT DEFAULT '',
-		duration_minutes INTEGER DEFAULT 0,
-		mute_notifications INTEGER DEFAULT 0,
-		enabled INTEGER DEFAULT 0,
-		icon TEXT DEFAULT 'shield',
-		color TEXT DEFAULT '#6366f1',
-		created_at TEXT NOT NULL DEFAULT (datetime('now')),
-		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-	);
-	CREATE TABLE IF NOT EXISTS focus_mode_apps (
-		id TEXT PRIMARY KEY,
-		mode_id TEXT NOT NULL REFERENCES focus_modes(id) ON DELETE CASCADE,
-		app_name TEXT NOT NULL,
-		app_exec TEXT NOT NULL,
-		close_on_activate INTEGER DEFAULT 0,
-		created_at TEXT NOT NULL DEFAULT (datetime('now')),
-		UNIQUE(mode_id, app_exec)
-	);
-	CREATE TABLE IF NOT EXISTS focus_mode_sessions (
-		id TEXT PRIMARY KEY,
-		mode_id TEXT NOT NULL REFERENCES focus_modes(id) ON DELETE CASCADE,
-		started_at TEXT NOT NULL DEFAULT (datetime('now')),
-		ends_at TEXT,
-		finished_at TEXT,
-		status TEXT NOT NULL DEFAULT 'active',
-		created_at TEXT NOT NULL DEFAULT (datetime('now'))
-	);
-	CREATE INDEX IF NOT EXISTS idx_focus_mode_apps_mode_id ON focus_mode_apps(mode_id);
-	CREATE INDEX IF NOT EXISTS idx_focus_mode_sessions_mode_id ON focus_mode_sessions(mode_id);
-	CREATE INDEX IF NOT EXISTS idx_focus_mode_sessions_status ON focus_mode_sessions(status);
-	CREATE TRIGGER IF NOT EXISTS update_focus_modes_updated_at
-	AFTER UPDATE ON focus_modes
-	BEGIN
-		UPDATE focus_modes SET updated_at = datetime('now') WHERE id = NEW.id;
-	END;`
-
-	_, err := s.database.DB().Exec(schema)
-	if err != nil {
-		return fmt.Errorf("init focus schema: %w", err)
+	// Add is_allowed column if it doesn't exist yet
+	alterSQL := `ALTER TABLE focus_mode_apps ADD COLUMN is_allowed INTEGER DEFAULT 0`
+	if _, err := s.database.DB().Exec(alterSQL); err != nil {
+		// Column likely already exists — ignore error
+		log.Println("[modes] is_allowed column may already exist (safe to ignore)")
 	}
-	log.Println("[modes] Focus schema initialized")
+
+	// Create focus_mode_urls table
+	urlsSchema := `
+	CREATE TABLE IF NOT EXISTS focus_mode_urls (
+		id TEXT PRIMARY KEY,
+		mode_id TEXT NOT NULL REFERENCES focus_modes(id) ON DELETE CASCADE,
+		url TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		UNIQUE(mode_id, url)
+	);
+	CREATE INDEX IF NOT EXISTS idx_focus_mode_urls_mode_id ON focus_mode_urls(mode_id);`
+	if _, err := s.database.DB().Exec(urlsSchema); err != nil {
+		return fmt.Errorf("init focus urls schema: %w", err)
+	}
+
+	log.Println("[modes] Focus URL schema initialized")
 	return nil
 }
 
@@ -98,8 +83,8 @@ func (s *ModeService) CheckResumeSessions() {
 		if err == nil && time.Now().After(endTime) {
 			log.Printf("[modes] Session timer expired, auto-deactivating")
 			s.queries.UpdateFocusSessionStatus(context.Background(), session.ID, "completed")
-			modeApps, _ := s.getModeAppExecs(session.ModeID)
-			UnblockApps(modeApps)
+			s.appBlocker.Stop()
+			s.urlBlocker.Stop()
 			if s.notifMuted {
 				RestoreNotifications()
 				s.notifMuted = false
@@ -126,6 +111,10 @@ func (s *ModeService) ListModes() ([]FocusMode, error) {
 		for _, a := range apps {
 			result[i].Apps = append(result[i].Apps, s.toFocusModeApp(&a))
 		}
+		urls, _ := s.queries.GetFocusModeURLsByModeID(context.Background(), m.ID)
+		for _, u := range urls {
+			result[i].AllowedURLs = append(result[i].AllowedURLs, u.URL)
+		}
 	}
 	return result, nil
 }
@@ -142,6 +131,10 @@ func (s *ModeService) GetMode(id string) (*FocusMode, error) {
 	apps, _ := s.queries.GetFocusModeAppsByModeID(context.Background(), id)
 	for _, a := range apps {
 		result.Apps = append(result.Apps, s.toFocusModeApp(&a))
+	}
+	urls, _ := s.queries.GetFocusModeURLsByModeID(context.Background(), id)
+	for _, u := range urls {
+		result.AllowedURLs = append(result.AllowedURLs, u.URL)
 	}
 	return &result, nil
 }
@@ -173,10 +166,23 @@ func (s *ModeService) CreateMode(req CreateModeRequest) (*FocusMode, error) {
 			AppName:         app.AppName,
 			AppExec:         app.AppExec,
 			CloseOnActivate: app.CloseOnActivate,
+			IsAllowed:       app.IsAllowed,
 		}
 		_, err := s.queries.CreateFocusModeApp(context.Background(), appParams)
 		if err != nil {
 			log.Printf("[modes] Failed to add app %s: %v", app.AppName, err)
+		}
+	}
+
+	for _, url := range req.AllowedURLs {
+		urlParams := db.CreateFocusModeURLParams{
+			ID:      uuid.New().String(),
+			ModeID:  id,
+			URL:     url,
+		}
+		_, err := s.queries.CreateFocusModeURL(context.Background(), urlParams)
+		if err != nil {
+			log.Printf("[modes] Failed to add URL %s: %v", url, err)
 		}
 	}
 
@@ -199,10 +205,10 @@ func (s *ModeService) UpdateMode(id string, req UpdateModeRequest) (*FocusMode, 
 		return nil, fmt.Errorf("update mode %s: %w", id, err)
 	}
 
+	// Replace apps
 	if err := s.queries.DeleteFocusModeAppsByModeID(context.Background(), id); err != nil {
 		log.Printf("[modes] Failed to clear apps for mode %s: %v", id, err)
 	}
-
 	for _, app := range req.Apps {
 		appParams := db.CreateFocusModeAppParams{
 			ID:               uuid.New().String(),
@@ -210,12 +216,30 @@ func (s *ModeService) UpdateMode(id string, req UpdateModeRequest) (*FocusMode, 
 			AppName:         app.AppName,
 			AppExec:         app.AppExec,
 			CloseOnActivate: app.CloseOnActivate,
+			IsAllowed:       app.IsAllowed,
 		}
 		_, err := s.queries.CreateFocusModeApp(context.Background(), appParams)
 		if err != nil {
 			log.Printf("[modes] Failed to add app %s: %v", app.AppName, err)
 		}
 	}
+
+	// Replace URLs
+	if err := s.queries.DeleteFocusModeURLsByModeID(context.Background(), id); err != nil {
+		log.Printf("[modes] Failed to clear URLs for mode %s: %v", id, err)
+	}
+	for _, url := range req.AllowedURLs {
+		urlParams := db.CreateFocusModeURLParams{
+			ID:      uuid.New().String(),
+			ModeID:  id,
+			URL:     url,
+		}
+		_, err := s.queries.CreateFocusModeURL(context.Background(), urlParams)
+		if err != nil {
+			log.Printf("[modes] Failed to add URL %s: %v", url, err)
+		}
+	}
+
 	if req.Enabled {
 		s.disableOtherModes(id)
 	}
@@ -272,38 +296,65 @@ func (s *ModeService) ActivateMode(modeID string) (*FocusSession, error) {
 		return nil, fmt.Errorf("mode %s not found", modeID)
 	}
 
-	apps, err := s.queries.GetFocusModeAppsByModeID(context.Background(), modeID)
+	// Get allowed apps (is_allowed = true)
+	allowedApps, err := s.queries.GetFocusModeAllowedAppsByModeID(context.Background(), modeID)
+	if err != nil {
+		return nil, fmt.Errorf("get allowed apps for mode %s: %w", modeID, err)
+	}
+
+	// Get all apps for close-on-activate
+	allApps, err := s.queries.GetFocusModeAppsByModeID(context.Background(), modeID)
 	if err != nil {
 		return nil, fmt.Errorf("get apps for mode %s: %w", modeID, err)
 	}
 
-	execNames := make([]string, 0, len(apps))
-	for _, a := range apps {
-		execNames = append(execNames, a.AppExec)
+	// Build exec name lists
+	allowedExecs := make([]string, 0, len(allowedApps))
+	for _, a := range allowedApps {
+		allowedExecs = append(allowedExecs, strings.ToLower(a.AppExec))
 	}
 
 	var closeAppsList []string
-	for _, a := range apps {
+	for _, a := range allApps {
 		if a.CloseOnActivate {
 			closeAppsList = append(closeAppsList, a.AppExec)
+			// Always allow apps that close on activate (they get killed and stay dead)
 		}
 	}
+
+	// Close apps marked for closing
 	if len(closeAppsList) > 0 {
 		CloseApps(closeAppsList)
 	}
 
-	BlockApps(execNames)
+	// Start continuous app blocker
+	// Re-checks foreground every 2 seconds and blocks anything not in allowed list
+	s.appBlocker.Start(allowedExecs, closeAppsList, 2*time.Second)
 
+	// Start URL blocker (whitelist mode — block ALL except allowed)
+	allowedURLs, _ := s.queries.GetFocusModeURLsByModeID(context.Background(), modeID)
+	urlStrs := make([]string, 0, len(allowedURLs))
+	for _, u := range allowedURLs {
+		urlStrs = append(urlStrs, u.URL)
+	}
+	if len(urlStrs) > 0 {
+		if err := s.urlBlocker.Start(DefaultProxyPort, urlStrs); err != nil {
+			log.Printf("[modes] Failed to start URL blocker: %v", err)
+		}
+	}
+
+	// Mute notifications if configured
+	if m.MuteNotifications && !s.notifMuted {
+		MuteNotifications()
+		s.notifMuted = true
+	}
+
+	// Create session and timer
 	var endsAt *string
 	if m.DurationMinutes > 0 {
 		endTime := time.Now().Add(time.Duration(m.DurationMinutes) * time.Minute)
 		formatted := endTime.Format("2006-01-02 15:04:05")
 		endsAt = &formatted
-	}
-
-	if m.MuteNotifications && !s.notifMuted {
-		MuteNotifications()
-		s.notifMuted = true
 	}
 
 	sessionID := uuid.New().String()
@@ -323,7 +374,8 @@ func (s *ModeService) ActivateMode(modeID string) (*FocusSession, error) {
 		s.startTimer(sessionID, modeID, duration)
 	}
 
-	log.Printf("[modes] Activated mode %s, session %s, blocks %d apps", m.Name, sessionID, len(apps))
+	log.Printf("[modes] Activated mode %s, session %s, %d allowed apps, %d allowed URLs",
+		m.Name, sessionID, len(allowedExecs), len(urlStrs))
 
 	return &FocusSession{
 		ID:        session.ID,
@@ -348,18 +400,21 @@ func (s *ModeService) DeactivateMode(sessionID string) error {
 		return fmt.Errorf("update session: %w", err)
 	}
 
+	// Stop timers
 	if timer, ok := s.timers[session.ModeID]; ok {
 		timer.Stop()
 		delete(s.timers, session.ModeID)
 	}
 
-	apps, _ := s.queries.GetFocusModeAppsByModeID(context.Background(), session.ModeID)
-	execNames := make([]string, 0, len(apps))
-	for _, a := range apps {
-		execNames = append(execNames, a.AppExec)
-	}
-	UnblockApps(execNames)
+	// Stop continuous app blocker
+	s.appBlocker.Stop()
 
+	// Stop URL blocker
+	if err := s.urlBlocker.Stop(); err != nil {
+		log.Printf("[modes] Failed to stop URL blocker: %v", err)
+	}
+
+	// Restore notifications
 	if s.notifMuted {
 		RestoreNotifications()
 		s.notifMuted = false
@@ -387,8 +442,87 @@ func (s *ModeService) GetActiveSession() (*FocusSession, error) {
 	return result, nil
 }
 
+// GetInstalledApps returns apps from app-mappings that also exist on user's PC
 func (s *ModeService) GetInstalledApps() ([]InstalledApp, error) {
-	return GetInstalledApps()
+	// 1. Apps from app-mappings.json (known apps catalog)
+	mappedApps, _ := GetAppsFromMappings()
+
+	// 2. Apps installed on system (.lnk / .desktop)
+	systemApps, err := GetInstalledApps()
+	if err != nil {
+		log.Printf("[modes] failed to list installed apps: %v", err)
+		systemApps = nil
+	}
+
+	// 3. Currently running processes
+	runningApps, err := s.tracker.ListRunningProcesses()
+	if err != nil {
+		log.Printf("[modes] failed to list running processes: %v", err)
+		runningApps = nil
+	}
+
+	// Build set of apps actually on user PC (installed + running)
+	pcSet := make(map[string]bool)
+	for _, a := range systemApps {
+		pcSet[strings.ToLower(a.Exec)] = true
+	}
+	for _, a := range runningApps {
+		pcSet[strings.ToLower(a.Exec)] = true
+	}
+
+	// Filter out whitelisted apps (never show / never block)
+	whitelist := GetWhitelistExecs()
+
+	// Only show mapped apps that also exist on the user's PC
+	merged := make([]InstalledApp, 0, len(mappedApps))
+	for _, app := range mappedApps {
+		key := strings.ToLower(app.Exec)
+		if whitelist[key] {
+			continue
+		}
+		if pcSet[key] {
+			merged = append(merged, app)
+		}
+	}
+
+	return merged, nil
+}
+
+// CheckAppOnPC checks if a given app exec name exists on the user's PC
+func (s *ModeService) CheckAppOnPC(appExec string) bool {
+	key := strings.ToLower(appExec)
+
+	// Check in installed apps
+	systemApps, err := GetInstalledApps()
+	if err == nil {
+		for _, a := range systemApps {
+			if strings.ToLower(a.Exec) == key {
+				return true
+			}
+		}
+	}
+
+	// Check in running processes
+	runningApps, err := s.tracker.ListRunningProcesses()
+	if err == nil {
+		for _, a := range runningApps {
+			if strings.ToLower(a.Exec) == key {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// AddToAppMappings persists an app to app-mappings.json (Velosi format)
+func (s *ModeService) AddToAppMappings(appName, appExec string, category string) error {
+	// Use a default category if none provided
+	if category == "" {
+		category = "productive"
+	}
+	// This updates the app-mappings.json file
+	return addAppToMappingsFile(appName, appExec, category)
 }
 
 func (s *ModeService) toFocusMode(m *db.FocusMode) FocusMode {
@@ -413,6 +547,7 @@ func (s *ModeService) toFocusModeApp(a *db.FocusModeApp) FocusModeApp {
 		AppName:         a.AppName,
 		AppExec:         a.AppExec,
 		CloseOnActivate: a.CloseOnActivate,
+		IsAllowed:       a.IsAllowed,
 	}
 }
 
@@ -459,8 +594,8 @@ func (s *ModeService) deactivateIfActive(modeID string) {
 			timer.Stop()
 			delete(s.timers, modeID)
 		}
-		execs, _ := s.getModeAppExecs(modeID)
-		UnblockApps(execs)
+		s.appBlocker.Stop()
+		s.urlBlocker.Stop()
 		if s.notifMuted {
 			RestoreNotifications()
 			s.notifMuted = false
@@ -481,8 +616,10 @@ func (s *ModeService) startTimer(sessionID, modeID string, duration time.Duratio
 		if err != nil {
 			log.Printf("[modes] Failed to complete session %s: %v", sessionID, err)
 		}
-		execs, _ := s.getModeAppExecs(modeID)
-		UnblockApps(execs)
+
+		s.appBlocker.Stop()
+		s.urlBlocker.Stop()
+
 		if s.notifMuted {
 			RestoreNotifications()
 			s.notifMuted = false

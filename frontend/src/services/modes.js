@@ -8,6 +8,9 @@ import {
   ActivateMode,
   DeactivateMode,
   GetActiveSession,
+  GetAllDetectableApps,
+  CheckAppOnPC,
+  AddAllowedApp,
 } from "../../wailsjs/go/main/App"
 
 export const modesService = {
@@ -21,7 +24,7 @@ export const modesService = {
     return modes.find(m => m.id === id) || null
   },
 
-  async create({ name, description, durationMinutes, muteNotifications, enabled, icon, color, apps }) {
+  async create({ name, description, durationMinutes, muteNotifications, enabled, icon, color, apps, allowedUrls }) {
     const raw = await CreateMode(
       name,
       description,
@@ -29,12 +32,13 @@ export const modesService = {
       muteNotifications,
       icon,
       color,
-      JSON.stringify(apps)
+      JSON.stringify(apps),
+      JSON.stringify(allowedUrls || [])
     )
     return raw ? JSON.parse(raw) : null
   },
 
-  async update({ id, name, description, durationMinutes, muteNotifications, enabled, icon, color, apps }) {
+  async update({ id, name, description, durationMinutes, muteNotifications, enabled, icon, color, apps, allowedUrls }) {
     const raw = await UpdateMode(
       id,
       name,
@@ -44,7 +48,8 @@ export const modesService = {
       enabled,
       icon,
       color,
-      JSON.stringify(apps)
+      JSON.stringify(apps),
+      JSON.stringify(allowedUrls || [])
     )
     return raw ? JSON.parse(raw) : null
   },
@@ -57,9 +62,13 @@ export const modesService = {
     return ToggleMode(id, enabled)
   },
 
-  async getInstalledApps() {
-    const raw = await GetInstalledApps()
+  async getAllDetectableApps() {
+    const raw = await GetAllDetectableApps()
     return raw ? JSON.parse(raw) : []
+  },
+
+  async checkAppOnPC(appExec) {
+    return CheckAppOnPC(appExec)
   },
 
   async activate(modeId) {
@@ -75,5 +84,10 @@ export const modesService = {
     const raw = await GetActiveSession()
     if (!raw) return null
     return JSON.parse(raw)
+  },
+
+  async addAllowedApp(modeId, appName, appExec, category, force) {
+    const raw = await AddAllowedApp(modeId, appName, appExec, category || "productive", force || false)
+    return raw ? JSON.parse(raw) : null
   },
 }

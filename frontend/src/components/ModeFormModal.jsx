@@ -4,7 +4,7 @@ import { TimerControl } from "./TimerControl"
 import { AppSelector } from "./AppSelector"
 import { Input } from "./ui/input"
 import { Button } from "./ui/button"
-import { Save } from "lucide-react"
+import { Save, Plus, X } from "lucide-react"
 
 const ICON_OPTIONS = [
   { value: "shield", label: "Shield" },
@@ -37,6 +37,8 @@ export function ModeFormModal({ open, onClose, mode, onSave }) {
   const [icon, setIcon] = useState("shield")
   const [color, setColor] = useState("#6366f1")
   const [apps, setApps] = useState([])
+  const [allowedUrls, setAllowedUrls] = useState([])
+  const [urlInput, setUrlInput] = useState("")
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -52,7 +54,9 @@ export function ModeFormModal({ open, onClose, mode, onSave }) {
           app_name: a.app_name,
           app_exec: a.app_exec,
           close_on_activate: a.close_on_activate || false,
+          is_allowed: a.is_allowed !== false,
         })))
+        setAllowedUrls(mode.allowed_urls || [])
       } else {
         setName("")
         setDescription("")
@@ -61,6 +65,7 @@ export function ModeFormModal({ open, onClose, mode, onSave }) {
         setIcon("shield")
         setColor("#6366f1")
         setApps([])
+        setAllowedUrls([])
       }
     }
   }, [open, mode])
@@ -71,11 +76,12 @@ export function ModeFormModal({ open, onClose, mode, onSave }) {
       if (exists) {
         return prev.filter(a => a.app_exec !== app.exec)
       }
-      return [...prev, {
+      return [{
         app_name: app.name,
         app_exec: app.exec,
         close_on_activate: false,
-      }]
+        is_allowed: true,
+      }, ...prev]
     })
   }
 
@@ -85,6 +91,17 @@ export function ModeFormModal({ open, onClose, mode, onSave }) {
         ? { ...a, close_on_activate: close }
         : a
     ))
+  }
+
+  const handleAddUrl = () => {
+    const url = urlInput.trim().toLowerCase()
+    if (!url || allowedUrls.includes(url)) return
+    setAllowedUrls(prev => [...prev, url])
+    setUrlInput("")
+  }
+
+  const handleRemoveUrl = (url) => {
+    setAllowedUrls(prev => prev.filter(u => u !== url))
   }
 
   const handleSubmit = async () => {
@@ -101,6 +118,7 @@ export function ModeFormModal({ open, onClose, mode, onSave }) {
         icon,
         color,
         apps,
+        allowedUrls,
       })
       onClose()
     } finally {
@@ -180,10 +198,48 @@ export function ModeFormModal({ open, onClose, mode, onSave }) {
           </div>
         </div>
 
+        {/* Allowed URLs (whitelist) */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-muted-foreground">Allowed Websites</label>
+          <p className="text-xs text-muted-foreground">All sites are blocked except those listed below</p>
+          <div className="flex gap-2">
+            <input
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAddUrl()}
+              placeholder="e.g. github.com"
+              className="flex-1 h-9 rounded-lg border border-border bg-transparent px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <button
+              onClick={handleAddUrl}
+              disabled={!urlInput.trim()}
+              className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+          {allowedUrls.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {allowedUrls.map(url => (
+                <span
+                  key={url}
+                  className="inline-flex items-center gap-1 rounded-full bg-green-500/10 text-green-500 px-2.5 py-0.5 text-xs"
+                >
+                  {url}
+                  <button onClick={() => handleRemoveUrl(url)} className="hover:text-green-300">
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
         <AppSelector
           selected={apps}
           onToggle={handleToggleApp}
           onToggleClose={handleToggleClose}
+          modeId={mode?.id || ''}
         />
 
         <div className="flex justify-end gap-3 pt-2">

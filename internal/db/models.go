@@ -97,7 +97,15 @@ type FocusModeApp struct {
 	AppName         string `json:"app_name" db:"app_name"`
 	AppExec         string `json:"app_exec" db:"app_exec"`
 	CloseOnActivate bool   `json:"close_on_activate" db:"close_on_activate"`
+	IsAllowed       bool   `json:"is_allowed" db:"is_allowed"`
 	CreatedAt       string `json:"created_at" db:"created_at"`
+}
+
+type FocusModeURL struct {
+	ID        string `json:"id" db:"id"`
+	ModeID   string `json:"mode_id" db:"mode_id"`
+	URL      string `json:"url" db:"url"`
+	CreatedAt string `json:"created_at" db:"created_at"`
 }
 
 type FocusModeSession struct {
@@ -138,6 +146,13 @@ type CreateFocusModeAppParams struct {
 	AppName         string
 	AppExec         string
 	CloseOnActivate bool
+	IsAllowed       bool
+}
+
+type CreateFocusModeURLParams struct {
+	ID      string
+	ModeID string
+	URL    string
 }
 
 type CreateFocusSessionParams struct {

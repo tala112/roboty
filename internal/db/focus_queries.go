@@ -34,17 +34,35 @@ RETURNING *`
 // Focus mode app queries
 const (
 	createFocusModeApp = `
-INSERT INTO focus_mode_apps (id, mode_id, app_name, app_exec, close_on_activate, created_at)
-VALUES ($1, $2, $3, $4, $5, datetime('now'))
+INSERT INTO focus_mode_apps (id, mode_id, app_name, app_exec, close_on_activate, is_allowed, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, datetime('now'))
 RETURNING *`
 
 	getFocusModeAppsByModeID = `
-SELECT id, mode_id, app_name, app_exec, close_on_activate, created_at
+SELECT id, mode_id, app_name, app_exec, close_on_activate, is_allowed, created_at
 FROM focus_mode_apps WHERE mode_id = $1 ORDER BY app_name ASC`
+
+	getFocusModeAllowedAppsByModeID = `
+SELECT id, mode_id, app_name, app_exec, close_on_activate, is_allowed, created_at
+FROM focus_mode_apps WHERE mode_id = $1 AND is_allowed = 1 ORDER BY app_name ASC`
 
 	deleteFocusModeApp = `DELETE FROM focus_mode_apps WHERE id = $1`
 
 	deleteFocusModeAppsByModeID = `DELETE FROM focus_mode_apps WHERE mode_id = $1`
+)
+
+// Focus mode URL queries
+const (
+	createFocusModeURL = `
+INSERT INTO focus_mode_urls (id, mode_id, url, created_at)
+VALUES ($1, $2, $3, datetime('now'))
+RETURNING *`
+
+	getFocusModeURLsByModeID = `
+SELECT id, mode_id, url, created_at
+FROM focus_mode_urls WHERE mode_id = $1 ORDER BY url ASC`
+
+	deleteFocusModeURLsByModeID = `DELETE FROM focus_mode_urls WHERE mode_id = $1`
 )
 
 // Focus mode session queries
@@ -141,12 +159,16 @@ func (q *Queries) DeleteFocusMode(ctx context.Context, id string) error {
 }
 
 func (q *Queries) CreateFocusModeApp(ctx context.Context, arg CreateFocusModeAppParams) (*FocusModeApp, error) {
+	isAllowed := 0
+	if arg.IsAllowed {
+		isAllowed = 1
+	}
 	row := q.db.QueryRowContext(ctx, createFocusModeApp,
-		arg.ID, arg.ModeID, arg.AppName, arg.AppExec, arg.CloseOnActivate,
+		arg.ID, arg.ModeID, arg.AppName, arg.AppExec, arg.CloseOnActivate, isAllowed,
 	)
 	var a FocusModeApp
 	err := row.Scan(
-		&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.CreatedAt,
+		&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.IsAllowed, &a.CreatedAt,
 	)
 	return &a, err
 }
@@ -161,7 +183,27 @@ func (q *Queries) GetFocusModeAppsByModeID(ctx context.Context, modeID string) (
 	for rows.Next() {
 		var a FocusModeApp
 		err := rows.Scan(
-			&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.CreatedAt,
+			&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.IsAllowed, &a.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		apps = append(apps, a)
+	}
+	return apps, rows.Err()
+}
+
+func (q *Queries) GetFocusModeAllowedAppsByModeID(ctx context.Context, modeID string) ([]FocusModeApp, error) {
+	rows, err := q.db.QueryContext(ctx, getFocusModeAllowedAppsByModeID, modeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var apps []FocusModeApp
+	for rows.Next() {
+		var a FocusModeApp
+		err := rows.Scan(
+			&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.IsAllowed, &a.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -178,6 +220,43 @@ func (q *Queries) DeleteFocusModeApp(ctx context.Context, id string) error {
 
 func (q *Queries) DeleteFocusModeAppsByModeID(ctx context.Context, modeID string) error {
 	_, err := q.db.ExecContext(ctx, deleteFocusModeAppsByModeID, modeID)
+	return err
+}
+
+// Focus mode URL functions
+func (q *Queries) CreateFocusModeURL(ctx context.Context, arg CreateFocusModeURLParams) (*FocusModeURL, error) {
+	row := q.db.QueryRowContext(ctx, createFocusModeURL,
+		arg.ID, arg.ModeID, arg.URL,
+	)
+	var u FocusModeURL
+	err := row.Scan(
+		&u.ID, &u.ModeID, &u.URL, &u.CreatedAt,
+	)
+	return &u, err
+}
+
+func (q *Queries) GetFocusModeURLsByModeID(ctx context.Context, modeID string) ([]FocusModeURL, error) {
+	rows, err := q.db.QueryContext(ctx, getFocusModeURLsByModeID, modeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var urls []FocusModeURL
+	for rows.Next() {
+		var u FocusModeURL
+		err := rows.Scan(
+			&u.ID, &u.ModeID, &u.URL, &u.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		urls = append(urls, u)
+	}
+	return urls, rows.Err()
+}
+
+func (q *Queries) DeleteFocusModeURLsByModeID(ctx context.Context, modeID string) error {
+	_, err := q.db.ExecContext(ctx, deleteFocusModeURLsByModeID, modeID)
 	return err
 }
 

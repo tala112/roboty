@@ -8,18 +8,31 @@ const PRESETS = [
 ]
 
 export function TimerControl({ value, onChange }) {
-  const [custom, setCustom] = useState(value > 0 && !PRESETS.some(p => p.value === value))
+  const [inputVal, setInputVal] = useState(value > 0 ? String(value) : "")
 
   const handlePreset = (val) => {
-    setCustom(false)
+    setInputVal(String(val))
     onChange(val)
   }
 
-  const handleCustomChange = (e) => {
-    const v = parseInt(e.target.value, 10)
-    if (!isNaN(v) && v > 0) {
-      onChange(v)
-    } else if (e.target.value === "") {
+  const handleInputChange = (e) => {
+    const raw = e.target.value
+    // Allow only digits
+    if (!/^\d*$/.test(raw)) return
+    setInputVal(raw)
+    if (raw === "") {
+      onChange(0)
+    } else {
+      const v = parseInt(raw, 10)
+      if (v > 0) {
+        onChange(v)
+      }
+    }
+  }
+
+  const handleBlur = () => {
+    if (inputVal === "" || inputVal === "0") {
+      setInputVal("")
       onChange(0)
     }
   }
@@ -29,7 +42,7 @@ export function TimerControl({ value, onChange }) {
       <label className="block text-sm font-medium text-muted-foreground">Duration</label>
       <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => { setCustom(false); onChange(0) }}
+          onClick={() => { setInputVal(""); onChange(0) }}
           className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
             !value ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"
           }`}
@@ -41,7 +54,7 @@ export function TimerControl({ value, onChange }) {
             key={p.value}
             onClick={() => handlePreset(p.value)}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
-              value === p.value && !custom
+              value === p.value
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-border text-muted-foreground hover:border-primary/50"
             }`}
@@ -49,29 +62,24 @@ export function TimerControl({ value, onChange }) {
             {p.label}
           </button>
         ))}
-        <button
-          onClick={() => { setCustom(true); onChange(0) }}
-          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
-            custom ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"
-          }`}
-        >
-          Custom
-        </button>
       </div>
-      {custom && (
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min="1"
-            max="1440"
-            value={value || ""}
-            onChange={handleCustomChange}
-            placeholder="Minutes"
-            className="w-24 h-9 rounded-lg border border-border bg-transparent px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-          />
-          <span className="text-xs text-muted-foreground">minutes</span>
-        </div>
-      )}
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={inputVal}
+          onChange={handleInputChange}
+          onBlur={handleBlur}
+          placeholder="Minutes (any duration)"
+          className="w-36 h-9 rounded-lg border border-border bg-transparent px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground/50"
+        />
+        <span className="text-xs text-muted-foreground">minutes</span>
+        {value > 0 && (
+          <span className="text-xs text-muted-foreground/60">
+            ({value >= 60 ? `${Math.floor(value / 60)}h ${value % 60}m` : `${value} min`})
+          </span>
+        )}
+      </div>
     </div>
   )
 }
