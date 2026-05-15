@@ -64,7 +64,9 @@
       "smartscreen.exe",
       "ApplicationFrameHost.exe",
       "TextInputHost.exe",
-      "taskmgr.exe"
+      "taskmgr.exe",
+      "ctfmon.exe",
+      "sihost.exe"
     ],
 
     "ui_shell": [
