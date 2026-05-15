@@ -4,15 +4,33 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 // GetWhitelistExecs reads whitelist.json and returns all executable/process names
 // that must never be blocked or shown to the user.
 func GetWhitelistExecs() map[string]bool {
-	data, err := os.ReadFile("internal/modes/whitelist.json")
-	if err != nil {
-		log.Printf("[whitelist] failed to read: %v", err)
+	paths := []string{
+		"internal/modes/whitelist.json",
+		"whitelist.json",
+	}
+	var data []byte
+	var err error
+	for _, p := range paths {
+		data, err = os.ReadFile(p)
+		if err == nil {
+			break
+		}
+		// Also try relative to executable
+		abs, _ := filepath.Abs(p)
+		data, err = os.ReadFile(abs)
+		if err == nil {
+			break
+		}
+	}
+	if data == nil {
+		log.Printf("[whitelist] failed to read from any path: %v", err)
 		return map[string]bool{}
 	}
 	var raw interface{}

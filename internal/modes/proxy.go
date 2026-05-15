@@ -120,6 +120,8 @@ func (ub *URLBlocker) isAllowed(host string) bool {
 	if idx := strings.LastIndex(host, ":"); idx > 0 {
 		host = host[:idx]
 	}
+	// Strip trailing dot (FQDN form)
+	host = strings.TrimSuffix(host, ".")
 
 	ub.mu.Lock()
 	allowed := ub.allowedURLs
@@ -147,9 +149,12 @@ func (ub *URLBlocker) handleHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ub *URLBlocker) handleHTTPS(w http.ResponseWriter, r *http.Request) {
-	host := r.Host
+	host := r.URL.Hostname()
+	if host == "" {
+		host = r.Host
+	}
 	if !ub.isAllowed(host) {
-		log.Printf("[proxy] blocked HTTPS: %s", host)
+		log.Printf("[proxy] blocked HTTPS: %s (host=%s url_host=%s)", host, r.Host, r.URL.Hostname())
 		ub.writeBlockPage(w)
 		return
 	}
@@ -178,9 +183,12 @@ func (ub *URLBlocker) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ub *URLBlocker) handleHTTPPlain(w http.ResponseWriter, r *http.Request) {
-	host := r.Host
+	host := r.URL.Hostname()
+	if host == "" {
+		host = r.Host
+	}
 	if !ub.isAllowed(host) {
-		log.Printf("[proxy] blocked HTTP: %s", host)
+		log.Printf("[proxy] blocked HTTP: %s (host=%s url_host=%s)", host, r.Host, r.URL.Hostname())
 		ub.writeBlockPage(w)
 		return
 	}

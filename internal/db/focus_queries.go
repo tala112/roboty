@@ -39,11 +39,11 @@ VALUES ($1, $2, $3, $4, $5, $6, datetime('now'))
 RETURNING *`
 
 	getFocusModeAppsByModeID = `
-SELECT id, mode_id, app_name, app_exec, close_on_activate, is_allowed, created_at
+SELECT id, mode_id, app_name, app_exec, close_on_activate, created_at, is_allowed
 FROM focus_mode_apps WHERE mode_id = $1 ORDER BY app_name ASC`
 
 	getFocusModeAllowedAppsByModeID = `
-SELECT id, mode_id, app_name, app_exec, close_on_activate, is_allowed, created_at
+SELECT id, mode_id, app_name, app_exec, close_on_activate, created_at, is_allowed
 FROM focus_mode_apps WHERE mode_id = $1 AND is_allowed = 1 ORDER BY app_name ASC`
 
 	deleteFocusModeApp = `DELETE FROM focus_mode_apps WHERE id = $1`
@@ -168,7 +168,7 @@ func (q *Queries) CreateFocusModeApp(ctx context.Context, arg CreateFocusModeApp
 	)
 	var a FocusModeApp
 	err := row.Scan(
-		&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.IsAllowed, &a.CreatedAt,
+		&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.CreatedAt, &a.IsAllowed,
 	)
 	return &a, err
 }
@@ -183,7 +183,7 @@ func (q *Queries) GetFocusModeAppsByModeID(ctx context.Context, modeID string) (
 	for rows.Next() {
 		var a FocusModeApp
 		err := rows.Scan(
-			&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.IsAllowed, &a.CreatedAt,
+			&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.CreatedAt, &a.IsAllowed,
 		)
 		if err != nil {
 			return nil, err
@@ -203,7 +203,7 @@ func (q *Queries) GetFocusModeAllowedAppsByModeID(ctx context.Context, modeID st
 	for rows.Next() {
 		var a FocusModeApp
 		err := rows.Scan(
-			&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.IsAllowed, &a.CreatedAt,
+			&a.ID, &a.ModeID, &a.AppName, &a.AppExec, &a.CloseOnActivate, &a.CreatedAt, &a.IsAllowed,
 		)
 		if err != nil {
 			return nil, err

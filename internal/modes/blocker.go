@@ -73,10 +73,6 @@ func (ab *AppBlocker) Start(allowedExecs []string, closeOnActivate []string, int
 
 				execLower := strings.ToLower(activity.ExecName)
 
-				if execLower == "roboty" || execLower == "roboty1" {
-					continue
-				}
-
 				if !allowedSet[execLower] {
 					log.Printf("[blocker] blocking %s (exec=%s) — not in allowed list", activity.AppName, activity.ExecName)
 					CloseApp(activity.ExecName)

@@ -97,8 +97,8 @@ type FocusModeApp struct {
 	AppName         string `json:"app_name" db:"app_name"`
 	AppExec         string `json:"app_exec" db:"app_exec"`
 	CloseOnActivate bool   `json:"close_on_activate" db:"close_on_activate"`
-	IsAllowed       bool   `json:"is_allowed" db:"is_allowed"`
 	CreatedAt       string `json:"created_at" db:"created_at"`
+	IsAllowed       bool   `json:"is_allowed" db:"is_allowed"`
 }
 
 type FocusModeURL struct {

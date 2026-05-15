@@ -35,7 +35,8 @@
       "ControlCenter",
       "NotificationCenter",
       "Spotlight",
-      "WindowManager"
+      "WindowManager",
+      "launchd"
     ]
   },
 
@@ -66,7 +67,13 @@
       "TextInputHost.exe",
       "taskmgr.exe",
       "ctfmon.exe",
-      "sihost.exe"
+      "sihost.exe",
+      "roboty",
+      "roboty1",
+      "roboty-dev",
+      "roboty.exe",
+      "roboty1.exe",
+      "roboty-dev.exe"
     ],
 
     "ui_shell": [
