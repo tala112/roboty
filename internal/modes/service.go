@@ -30,16 +30,20 @@ type ModeService struct {
 
 func NewModeService(database *db.DB, queries FocusDataStore) *ModeService {
 	tracker := NewForegroundTracker()
+	killer := NewRealProcessKiller()
+	proxyMgr := NewRealProxyManager()
+	notifMgr := NewRealNotificationManager()
+
 	return &ModeService{
 		database:    database,
 		queries:    queries,
 		timers:     make(map[string]*time.Timer),
 		tracker:    tracker,
-		appBlocker: NewAppBlocker(tracker),
-		urlBlocker: NewURLBlocker(),
-		killer:     NewRealProcessKiller(),
-		proxyMgr:   NewRealProxyManager(),
-		notifMgr:   NewRealNotificationManager(),
+		appBlocker: NewAppBlockerWithDI(tracker, killer),
+		urlBlocker: NewURLBlockerWithDI(proxyMgr, NewFileStateManager()),
+		killer:     killer,
+		proxyMgr:   proxyMgr,
+		notifMgr:   notifMgr,
 	}
 }
 

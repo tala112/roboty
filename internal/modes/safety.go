@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"Roboty/internal/platform"
 )
 
 // =============================================================================
@@ -490,7 +492,7 @@ func NewKillSafetyVerifier() *KillSafetyVerifier {
 		"explorer", "dwm", "csrss", "winlogon", "wininit", "lsass",
 		"services", "svchost", "runtimebroker", "taskhostw",
 		"shellexperiencehost", "startmenuexperiencehost", "searchhost",
-		"searchapp", "searchindexer", "systemsettings", "logonui",
+		"searchapp", "searchindexer", "searchprotocolhost", "searchfilterhost", "systemsettings", "logonui",
 		"lsm", "smartscreen", "applicationframehost", "textinputhost",
 		"taskmgr", "ctfmon", "sihost", "conhost", "cmd", "powershell",
 		"pwsh", "wt", "windowsterminal", "mstsc",
@@ -498,10 +500,13 @@ func NewKillSafetyVerifier() *KillSafetyVerifier {
 		// Linux
 		"systemd", "systemd-logind", "systemd-journald", "dbus-daemon",
 		"networkmanager", "wpa_supplicant", "polkitd", "udevd",
+		"systemd-networkd", "systemd-resolved", "systemd-udevd",
 		"gnome-shell", "mutter", "kwin", "plasmashell", "Xorg",
 		"Xwayland", "wayland", "pipewire", "pipewire-pulse", "pulseaudio",
 		"wireplumber", "lightdm", "gdm", "sddm", "login", "sshd", "init", "sway",
 		"bash", "zsh", "sh", "tmux", "screen",
+		// Kernel-level
+		"kthreadd", "kworker",
 		// macOS
 		"Finder", "Dock", "SystemUIServer", "ControlCenter",
 		"NotificationCenter", "Spotlight", "WindowManager", "WindowServer", "launchd", "loginwindow",
@@ -530,9 +535,12 @@ func (v *KillSafetyVerifier) Refresh() {
 	}
 
 	v.ancestors = make(map[string]bool)
-	for k := range GetAncestorExecs() {
-		normalized := strings.ToLower(strings.TrimSuffix(k, ".exe"))
-		v.ancestors[normalized] = true
+	if p := platform.GetGlobal(); p != nil {
+		ancestors, _ := p.GetAncestorExecs()
+		for k := range ancestors {
+			normalized := strings.ToLower(strings.TrimSuffix(k, ".exe"))
+			v.ancestors[normalized] = true
+		}
 	}
 }
 

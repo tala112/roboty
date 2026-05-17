@@ -1,33 +1,5 @@
 {
   "macos": {
-    "bundle_ids": [
-      "com.apple.loginwindow",
-      "com.apple.SecurityAgent",
-      "com.apple.finder",
-      "com.apple.dock",
-      "com.apple.SystemUIServer",
-      "com.apple.controlcenter",
-      "com.apple.notificationcenterui",
-      "com.apple.WindowManager",
-      "com.apple.launchd",
-      "com.apple.spotlight",
-      "com.apple.SystemSettings",
-      "com.apple.SoftwareUpdate",
-      "com.apple.backupd",
-      "com.apple.networkd",
-      "com.apple.WiFiAgent",
-      "com.apple.VoiceOverUtility"
-    ],
-
-    "ui_shell": [
-      "com.apple.spotlight",
-      "com.apple.SystemUIServer",
-      "com.apple.controlcenter",
-      "com.apple.notificationcenterui",
-      "com.apple.dock",
-      "com.apple.WindowManager"
-    ],
-
     "process_names": [
       "Finder",
       "Dock",

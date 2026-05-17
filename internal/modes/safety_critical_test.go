@@ -1234,10 +1234,8 @@ func TestCritical_WhitelistSyncWithSystemCritical(t *testing.T) {
 	// (skip kernel-level, non-process entries, and macOS bundle IDs)
 	skipFromComparison := map[string]bool{
 		"kernel": true, "swapper": true, "migration": true,
-		"ksoftirqd": true, "kworker": true, "kthreadd": true,
-		"systemd-networkd": true, "systemd-resolved": true, "systemd-udevd": true,
+		"ksoftirqd": true,
 		"krunner": true, "activities": true, "overview": true,
-		"searchprotocolhost": true, "searchfilterhost": true,
 	}
 	for name := range wlNormalized {
 		if selfProtection[name] || skipFromComparison[name] {

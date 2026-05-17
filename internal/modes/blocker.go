@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"Roboty/internal/platform"
 )
 
 type AppBlocker struct {
@@ -21,9 +23,10 @@ type AppBlocker struct {
 }
 
 func NewAppBlocker(tracker ForegroundDetector) *AppBlocker {
+	killer := NewRealProcessKiller()
 	return &AppBlocker{
 		foreground:       tracker,
-		killer:           NewRealProcessKiller(),
+		killer:           killer,
 		safetyVerifier:   GetGlobalSafetyVerifier(),
 		killLoopDetector: NewKillLoopDetector(),
 		auditLogger:      NewSafetyAuditLogger(500),
@@ -68,7 +71,11 @@ func (ab *AppBlocker) Start(allowedExecs []string, closeOnActivate []string, int
 		allowedSet[key] = true
 	}
 	// Add ancestor processes (never block own parent/launcher/terminal)
-	for e := range GetAncestorExecs() {
+	var ancestorExecs map[string]bool
+	if p := platform.GetGlobal(); p != nil {
+		ancestorExecs, _ = p.GetAncestorExecs()
+	}
+	for e := range ancestorExecs {
 		key := strings.ToLower(strings.TrimSuffix(e, ".exe"))
 		allowedSet[key] = true
 	}

@@ -187,6 +187,7 @@ func (a *App) InitDatabase() error {
 	}
 
 	a.modeService.CheckResumeSessions()
+	modes.CleanupOrphanedNotifications()
 
 	log.Println("[INFO] Database initialization complete")
 	return nil
