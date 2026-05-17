@@ -343,7 +343,7 @@ func (pw *ProxyWatchdog) checkHealth() {
 		return
 	}
 
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(ub.port))
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(ub.Port()))
 
 	// Test TCP connectivity first
 	conn, err := net.DialTimeout("tcp", addr, ProxyHealthTimeout)
@@ -500,10 +500,12 @@ func NewKillSafetyVerifier() *KillSafetyVerifier {
 		"networkmanager", "wpa_supplicant", "polkitd", "udevd",
 		"gnome-shell", "mutter", "kwin", "plasmashell", "Xorg",
 		"Xwayland", "wayland", "pipewire", "pipewire-pulse", "pulseaudio",
-		"wireplumber", 		"lightdm", "gdm", "sddm", "login", "sshd", "init", "sway",
+		"wireplumber", "lightdm", "gdm", "sddm", "login", "sshd", "init", "sway",
+		"bash", "zsh", "sh", "tmux", "screen",
 		// macOS
 		"Finder", "Dock", "SystemUIServer", "ControlCenter",
 		"NotificationCenter", "Spotlight", "WindowManager", "WindowServer", "launchd", "loginwindow",
+		"Terminal", "iTerm2", "bash", "zsh", "sh",
 	}
 
 	for _, name := range systemCritical {

@@ -222,6 +222,12 @@ func (ub *URLBlocker) SetAllowedURLs(urls []string) {
 	ub.allowedURLs = normalizeURLs(urls)
 }
 
+func (ub *URLBlocker) Port() int {
+	ub.mu.Lock()
+	defer ub.mu.Unlock()
+	return ub.port
+}
+
 func (ub *URLBlocker) IsRunning() bool {
 	ub.mu.Lock()
 	defer ub.mu.Unlock()

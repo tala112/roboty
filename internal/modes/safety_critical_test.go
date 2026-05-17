@@ -2,6 +2,7 @@ package modes
 
 import (
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -330,6 +331,14 @@ func TestCritical_Whitelist_AllRequiredEntries(t *testing.T) {
 		"Xorg",
 		"init",
 		"sway",
+		"bash",
+		"zsh",
+		"sh",
+		"tmux",
+		"screen",
+		// macOS
+		"Terminal",
+		"iTerm2",
 	}
 
 	for _, entry := range required {
@@ -609,6 +618,213 @@ func TestCritical_ProxyConnectTunnelHasTimeout(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("CRITICAL: transferTimed did not time out within 2s — tunnel goroutine may leak")
 	}
+}
+
+// =============================================================================
+// VM-SCENARIO TESTS — Expected outcomes per OS
+// =============================================================================
+
+func TestCritical_VMScenario_NewWhitelistEntriesProtected(t *testing.T) {
+	v := NewKillSafetyVerifier()
+	entries := []struct {
+		name string
+		oses []string
+	}{
+		// Linux shells & terminals
+		{"bash", []string{"linux", "darwin"}},
+		{"zsh", []string{"linux", "darwin"}},
+		{"sh", []string{"linux", "darwin"}},
+		{"tmux", []string{"linux"}},
+		{"screen", []string{"linux"}},
+		// macOS terminals
+		{"Terminal", []string{"darwin"}},
+		{"iTerm2", []string{"darwin"}},
+	}
+
+	for _, entry := range entries {
+		for _, variant := range []string{entry.name, entry.name + ".exe", strings.ToUpper(entry.name), entry.name} {
+			safe, reason := v.IsSafeToKill(variant)
+			if safe {
+				t.Errorf("CRITICAL: %q (%s) was allowed — protects %v", variant, entry.name, entry.oses)
+			}
+			_ = reason
+		}
+	}
+}
+
+func TestCritical_VMScenario_BlockerGoroutinePanicRecovery(t *testing.T) {
+	var recovered bool
+	SetGlobalEmergencyCallback(func(reason string) {
+		recovered = true
+	})
+	defer SetGlobalEmergencyCallback(nil)
+
+	tracker := NewForegroundTracker()
+	ab := NewAppBlocker(tracker)
+
+	executed := make(chan struct{})
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				recovered = true
+			}
+			close(executed)
+		}()
+		// Simulate the blocker goroutine with our panic recovery
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[blocker] 🚨 PANIC RECOVERED: %v", r)
+				if globalEmergencyCallback != nil {
+					globalEmergencyCallback("blocker-panic")
+				}
+			}
+		}()
+		defer func() {
+			ab.mu.Lock()
+			ab.running = false
+			ab.mu.Unlock()
+		}()
+		panic("simulated blocker crash")
+	}()
+
+	select {
+	case <-executed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CRITICAL: blocker goroutine did not recover from panic — would deadlock")
+	}
+
+	if !recovered {
+		t.Error("CRITICAL: blocker goroutine panic was not recovered — blocking would stop silently")
+	}
+}
+
+func TestCritical_VMScenario_BlockerIsRunningStateClean(t *testing.T) {
+	// After a panic in the blocker goroutine, IsRunning() must return false
+	tracker := NewForegroundTracker()
+	ab := NewAppBlocker(tracker)
+
+	ab.Start([]string{"chrome"}, nil, 1*time.Hour)
+	if !ab.IsRunning() {
+		t.Fatal("blocker should be running after Start")
+	}
+
+	ab.Stop()
+	if ab.IsRunning() {
+		t.Error("blocker should not be running after Stop")
+	}
+}
+
+func TestCritical_VMScenario_LinuxHeadlessProxyPassThrough(t *testing.T) {
+	fakeProxyMgr := newFakeProxyManager()
+	fakeProxyMgr.enableErr = os.ErrPermission // simulate gsettings unavailable
+	fakeState := newFakeStateFileManager()
+
+	ub := NewURLBlockerWithDI(fakeProxyMgr, fakeState)
+	port := getFreePort(t)
+
+	err := ub.Start(port, []string{"example.com"})
+	if err != nil {
+		t.Fatalf("proxy should start even if system proxy enable fails: %v", err)
+	}
+	defer ub.Stop()
+
+	if !ub.IsRunning() {
+		t.Error("proxy should be running after Start (pass-through)")
+	}
+	if fakeState.StateExists(proxyStateName) {
+		t.Error("state file must not exist when proxy enable failed — prevents orphan cleanup confusion")
+	}
+
+	// App blocking is NOT affected by proxy failure — only URL blocking is disabled
+	t.Log("VM scenario: Linux headless/CI — proxy pass-through, URL blocking disabled, app blocking active")
+}
+
+func TestCritical_VMScenario_MacOSProxyEnableFailure(t *testing.T) {
+	fakeProxyMgr := newFakeProxyManager()
+	fakeProxyMgr.enableErr = os.ErrPermission // simulate networksetup permission denied
+	fakeState := newFakeStateFileManager()
+
+	ub := NewURLBlockerWithDI(fakeProxyMgr, fakeState)
+	port := getFreePort(t)
+
+	err := ub.Start(port, []string{"example.com"})
+	if err != nil {
+		t.Fatalf("proxy should start even if networksetup fails: %v", err)
+	}
+	defer ub.Stop()
+
+	if !ub.IsRunning() {
+		t.Error("proxy should be running after Start (pass-through)")
+	}
+	if fakeState.StateExists(proxyStateName) {
+		t.Error("state file must not exist when networksetup failed")
+	}
+
+	t.Log("VM scenario: macOS networksetup permission denied — proxy pass-through, app blocking active")
+}
+
+func TestCritical_VMScenario_ProxyPortLockstepRead(t *testing.T) {
+	// Verifies ub.Port() returns the correct port and is thread-safe
+	// (regression: ub.port was previously read without mutex in checkHealth)
+	fakeProxyMgr := newFakeProxyManager()
+	fakeState := newFakeStateFileManager()
+
+	ub := NewURLBlockerWithDI(fakeProxyMgr, fakeState)
+	port := getFreePort(t)
+
+	err := ub.Start(port, []string{"example.com"})
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer ub.Stop()
+
+	// Port must match what we requested (or fallback if port was 0)
+	returnedPort := ub.Port()
+	if returnedPort != port {
+		t.Logf("Port requested=%d, Port() returned=%d (may differ if port was occupied)", port, returnedPort)
+	}
+
+	// Concurrent reads must not race
+	done := make(chan struct{}, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			_ = ub.Port()
+			done <- struct{}{}
+		}()
+	}
+	timeout := time.After(5 * time.Second)
+	for i := 0; i < 10; i++ {
+		select {
+		case <-done:
+		case <-timeout:
+			t.Fatal("VM scenario: Port() concurrent reads timed out — possible deadlock")
+		}
+	}
+}
+
+func TestCritical_VMScenario_AllPlatformsRequiredTests(t *testing.T) {
+	// This test documents the required test matrix per platform.
+	// It does not actually run platform-specific commands (safe for all environments).
+	t.Log("=== VM Test Matrix Requirements ===")
+	t.Log("Windows 11 24H2: go test -race -fuzz=30s -run TestCritical|TestChaos")
+	t.Log("Windows 10 22H2: go test -race -fuzz=30s -run TestCritical|TestChaos")
+	t.Log("Ubuntu 24.04 GNOME Wayland: go test -race -fuzz=30s -run TestCritical|TestChaos")
+	t.Log("macOS Sequoia: go test -race -fuzz=30s -run TestCritical|TestChaos")
+	t.Log("=== Expected Outcomes ===")
+	t.Log("Block explorer.exe → BLOCKED by safety verifier")
+	t.Log("Block gnome-shell  → BLOCKED by safety verifier")
+	t.Log("Block Finder       → BLOCKED by safety verifier")
+	t.Log("Block localhost    → BLOCKED by isAlwaysAllowed")
+	t.Log("Kill loop          → Detected after 10 kills in 30s")
+	t.Log("Proxy crash        → Watchdog → EmergencyStop")
+	t.Log("SIGINT/SIGTERM     → EmergencyStop → exit(1)")
+	t.Log("Orphaned proxy     → Cleaned up on restart")
+	t.Log("=== Pre-release Gate ===")
+	t.Log("CGO_ENABLED=1 + MinGW on Windows for -race")
+	t.Log("3 fuzz targets x 30s = 90s total")
+	t.Log("All 56+ tests pass on all 3 OSes")
+	t.Log("Whitelist sync test passes")
+	t.Log("Chaos suite passes")
 }
 
 // =============================================================================

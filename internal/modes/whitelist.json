@@ -38,7 +38,12 @@
       "WindowManager",
       "WindowServer",
       "launchd",
-      "loginwindow"
+      "loginwindow",
+      "Terminal",
+      "iTerm2",
+      "zsh",
+      "bash",
+      "sh"
     ]
   },
 
@@ -141,7 +146,12 @@
       "sshd",
       "init",
       "kthreadd",
-      "kworker"
+      "kworker",
+      "bash",
+      "zsh",
+      "sh",
+      "tmux",
+      "screen"
     ],
 
     "ui_shell": [

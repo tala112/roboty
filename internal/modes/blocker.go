@@ -75,6 +75,14 @@ func (ab *AppBlocker) Start(allowedExecs []string, closeOnActivate []string, int
 
 	go func() {
 		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[blocker] 🚨 PANIC RECOVERED: %v", r)
+				if globalEmergencyCallback != nil {
+					globalEmergencyCallback("blocker-panic")
+				}
+			}
+		}()
+		defer func() {
 			ab.mu.Lock()
 			ab.running = false
 			ab.mu.Unlock()
