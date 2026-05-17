@@ -332,6 +332,12 @@ func (ub *URLBlocker) handleHTTPPlain(w http.ResponseWriter, r *http.Request) {
 
 	transport := &http.Transport{
 		Proxy: nil, // Never use environment proxy — prevents proxy loops
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 	}
 	// Ensure Host header is set correctly on the outgoing request.
 	// Go's http.Server sets r.Host from the incoming Host header, but
