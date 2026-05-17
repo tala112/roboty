@@ -1,0 +1,102 @@
+name: VM Test Matrix (P0)
+on:
+  schedule:
+    - cron: '0 4 * * 1'   # Every Monday
+  workflow_dispatch:
+  push:
+    tags: ['v*']           # On release tags
+
+jobs:
+  # === P0: Windows 11 24H2 ===
+  win11-24h2:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Install MinGW (for race detector)
+        shell: powershell
+        run: choco install mingw -y --no-progress
+      - name: Check CGO (race detector prerequisite)
+        run: |
+          go env CGO_ENABLED
+          where gcc 2>$null; if ($?) { Write-Output "gcc available" } else { Write-Output "WARNING: no gcc — race tests require MinGW" }
+      - name: Vet
+        run: go vet ./...
+      - name: Safety-critical tests
+        run: go test -v -count=1 -run 'TestCritical|TestChaos|TestWhitelist' ./internal/modes/
+      - name: Race detector (requires CGO_ENABLED=1 + MinGW)
+        run: |
+          $env:CGO_ENABLED = "1"
+          $cc = where.exe gcc 2>$null
+          if ($cc) { go test -race -count=1 -short ./internal/... } else { Write-Output "SKIP: no gcc" }
+      - name: Fuzz tests
+        run: |
+          go test -fuzz=FuzzNormalizeKillExec -fuzztime=30s ./internal/modes/
+          go test -fuzz=FuzzIsAlwaysAllowed -fuzztime=30s ./internal/modes/
+          go test -fuzz=FuzzIsAllowed -fuzztime=30s ./internal/modes/
+
+  # === P0: Windows 10 22H2 ===
+  win10-22h2:
+    runs-on: windows-2019
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Install MinGW (for race detector)
+        shell: powershell
+        run: choco install mingw -y --no-progress
+      - name: Safety-critical tests
+        run: go test -v -count=1 -run TestCritical ./internal/modes/
+      - name: Race detector
+        shell: powershell
+        run: |
+          $cc = where.exe gcc 2>$null
+          if ($cc) { go test -race -count=1 -short ./internal/... } else { Write-Output "SKIP: no gcc" }
+      - name: Whitelist sync check
+        run: go test -v -count=1 -run TestCritical_WhitelistSyncWithSystemCritical ./internal/modes/
+
+  # === P0: Ubuntu 24.04 GNOME Wayland ===
+  ubuntu-2404-wayland:
+    runs-on: ubuntu-24.04
+    env:
+      CGO_ENABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Check CGO
+        run: go env CGO_ENABLED
+      - name: Safety-critical tests
+        run: go test -v -count=1 -run 'TestCritical|TestChaos' ./internal/modes/
+      - name: Race detector (CGO enabled on Linux)
+        run: go test -race -count=1 -short ./internal/...
+      - name: Fuzz tests
+        run: |
+          go test -fuzz=FuzzNormalizeKillExec -fuzztime=30s ./internal/modes/
+          go test -fuzz=FuzzIsAlwaysAllowed -fuzztime=30s ./internal/modes/
+          go test -fuzz=FuzzIsAllowed -fuzztime=30s ./internal/modes/
+
+  # === P0: macOS Sequoia ===
+  macos-sequoia:
+    runs-on: macos-15
+    env:
+      CGO_ENABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Safety-critical tests
+        run: go test -v -count=1 -run 'TestCritical|TestChaos' ./internal/modes/
+      - name: Race detector (CGO enabled on macOS)
+        run: go test -race -count=1 -short ./internal/...
+      - name: Whitelist sync check
+        run: go test -v -count=1 -run TestCritical_WhitelistSyncWithSystemCritical ./internal/modes/

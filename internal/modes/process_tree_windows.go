@@ -5,6 +5,8 @@ package modes
 import (
 	"log"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"unsafe"
 )
@@ -49,9 +51,8 @@ func GetAncestorExecs() map[string]bool {
 
 	snapshot, _, _ := procCreateToolhelp32Snapshot.Call(th32csSnapProcess, 0)
 	if snapshot == uintptr(0xFFFFFFFF) || snapshot == 0 {
-		execs["roboty"] = true
-		execs["roboty.exe"] = true
-		return execs
+		log.Printf("[proctree] CreateToolhelp32Snapshot failed — falling back to tasklist")
+		return getAncestorExecsFallback(pid, maxDepth)
 	}
 	defer procCloseHandle.Call(snapshot)
 
@@ -60,9 +61,9 @@ func GetAncestorExecs() map[string]bool {
 
 	ret, _, _ := procProcess32FirstW.Call(snapshot, uintptr(unsafe.Pointer(&pe)))
 	if ret == 0 {
-		execs["roboty"] = true
-		execs["roboty.exe"] = true
-		return execs
+		procCloseHandle.Call(snapshot)
+		log.Printf("[proctree] Process32FirstW failed — falling back to tasklist")
+		return getAncestorExecsFallback(pid, maxDepth)
 	}
 
 	for {
@@ -109,6 +110,82 @@ func GetAncestorExecs() map[string]bool {
 			names = append(names, e)
 		}
 		log.Printf("[proctree] ancestors (windows): %v", names)
+	}
+	return execs
+}
+
+// getAncestorExecsFallback builds the ancestor process map using PowerShell/WMIC
+// when CreateToolhelp32Snapshot is unavailable (sandboxed/restricted environments).
+func getAncestorExecsFallback(pid, maxDepth int) map[string]bool {
+	execs := make(map[string]bool)
+	execs["roboty"] = true
+	execs["roboty.exe"] = true
+
+	// Use PowerShell to get parent PID for our process chain
+	// Format: PowerShell returns lines of "pid,ppid,execname"
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		`Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name | ConvertTo-Csv -NoTypeInformation`)
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("[proctree] fallback PowerShell failed: %v", err)
+		return execs
+	}
+
+	// Build process map from CSV output
+	type procInfo struct {
+		parentPid int
+		execName  string
+	}
+	processMap := make(map[int]procInfo)
+
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line == `"ProcessId","ParentProcessId","Name"` {
+			continue
+		}
+		// CSV: "pid","ppid","name.exe"
+		parts := strings.Split(line, ",")
+		if len(parts) < 3 {
+			continue
+		}
+		pidStr := strings.Trim(parts[0], `"`)
+		ppidStr := strings.Trim(parts[1], `"`)
+		name := strings.Trim(parts[2], `"`)
+
+		pidNum, err1 := strconv.Atoi(pidStr)
+		ppidNum, err2 := strconv.Atoi(ppidStr)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		execName := strings.ToLower(strings.TrimSuffix(name, ".exe"))
+		processMap[pidNum] = procInfo{parentPid: ppidNum, execName: execName}
+	}
+
+	// Walk ancestor chain
+	currentPid := pid
+	for i := 0; i < maxDepth; i++ {
+		if info, ok := processMap[currentPid]; ok {
+			if info.execName != "" {
+				execs[info.execName] = true
+				execs[info.execName+".exe"] = true
+			}
+			ppid := info.parentPid
+			if ppid <= 0 || ppid == currentPid {
+				break
+			}
+			currentPid = ppid
+		} else {
+			break
+		}
+	}
+
+	if len(execs) > 0 {
+		names := make([]string, 0, len(execs))
+		for e := range execs {
+			names = append(names, e)
+		}
+		log.Printf("[proctree] ancestors (windows fallback): %v", names)
 	}
 	return execs
 }

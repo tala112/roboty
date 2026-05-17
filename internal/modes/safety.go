@@ -91,7 +91,16 @@ func SetupSignalHandler() {
 		sig := <-sigCh
 		log.Printf("[safety] 📡 Received signal %v — initiating emergency stop", sig)
 		if globalEmergencyCallback != nil {
-			globalEmergencyCallback("signal-" + sig.String())
+			done := make(chan struct{}, 1)
+			go func() {
+				globalEmergencyCallback("signal-" + sig.String())
+				done <- struct{}{}
+			}()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				log.Printf("[safety] ⚠️ EmergencyStop timed out — forcing exit")
+			}
 		}
 		os.Exit(1)
 	})
@@ -485,15 +494,16 @@ func NewKillSafetyVerifier() *KillSafetyVerifier {
 		"lsm", "smartscreen", "applicationframehost", "textinputhost",
 		"taskmgr", "ctfmon", "sihost", "conhost", "cmd", "powershell",
 		"pwsh", "wt", "windowsterminal", "mstsc",
+		"msedgewebview2", "fontdrvhost", "lockapp",
 		// Linux
 		"systemd", "systemd-logind", "systemd-journald", "dbus-daemon",
 		"networkmanager", "wpa_supplicant", "polkitd", "udevd",
 		"gnome-shell", "mutter", "kwin", "plasmashell", "Xorg",
 		"Xwayland", "wayland", "pipewire", "pipewire-pulse", "pulseaudio",
-		"wireplumber", "lightdm", "gdm", "sddm", "login", "sshd", "init",
+		"wireplumber", 		"lightdm", "gdm", "sddm", "login", "sshd", "init", "sway",
 		// macOS
 		"Finder", "Dock", "SystemUIServer", "ControlCenter",
-		"NotificationCenter", "Spotlight", "WindowManager", "WindowServer", "launchd",
+		"NotificationCenter", "Spotlight", "WindowManager", "WindowServer", "launchd", "loginwindow",
 	}
 
 	for _, name := range systemCritical {
@@ -567,15 +577,23 @@ var alwaysAllowedPrefixes = []string{
 func isAlwaysAllowed(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
 
-	// Strip port only if this is not an IPv6 address (IPv6 has multiple colons)
-	if strings.Count(host, ":") == 1 {
+	// Strip trailing dot
+	host = strings.TrimSuffix(host, ".")
+
+	// Strip port for IPv4 (single colon)
+	// Handle bracketed IPv6: [::1]:port → ::1
+	colonCount := strings.Count(host, ":")
+	if colonCount == 1 {
 		if idx := strings.LastIndex(host, ":"); idx > 0 {
 			host = host[:idx]
 		}
+	} else if strings.HasPrefix(host, "[") {
+		// Bracketed IPv6: [::1] or [::1]:port
+		closeBracket := strings.Index(host, "]")
+		if closeBracket > 0 {
+			host = host[1:closeBracket]
+		}
 	}
-
-	// Strip trailing dot
-	host = strings.TrimSuffix(host, ".")
 
 	if host == "" {
 		return true
@@ -590,8 +608,8 @@ func isAlwaysAllowed(host string) bool {
 		return true
 	}
 
-	// IPv6 loopback
-	if host == "0:0:0:0:0:0:0:1" || host == "0:0:0:0:0:0:0:0" {
+	// IPv6 loopback (uncompressed or full forms)
+	if host == "0:0:0:0:0:0:0:1" || host == "0:0:0:0:0:0:0:0" || host == "::1" || host == "::" {
 		return true
 	}
 

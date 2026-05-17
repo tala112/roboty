@@ -3,6 +3,7 @@ package modes
 import (
 	"context"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,25 +15,28 @@ type AppBlocker struct {
 	cancel          context.CancelFunc
 	foreground      ForegroundDetector
 	safetyVerifier  *KillSafetyVerifier
+	killLoopDetector *KillLoopDetector
 	auditLogger     *SafetyAuditLogger
 	killer          ProcessKiller
 }
 
 func NewAppBlocker(tracker ForegroundDetector) *AppBlocker {
 	return &AppBlocker{
-		foreground:     tracker,
-		killer:         NewRealProcessKiller(),
-		safetyVerifier: GetGlobalSafetyVerifier(),
-		auditLogger:    NewSafetyAuditLogger(500),
+		foreground:       tracker,
+		killer:           NewRealProcessKiller(),
+		safetyVerifier:   GetGlobalSafetyVerifier(),
+		killLoopDetector: NewKillLoopDetector(),
+		auditLogger:      NewSafetyAuditLogger(500),
 	}
 }
 
 func NewAppBlockerWithDI(tracker ForegroundDetector, killer ProcessKiller) *AppBlocker {
 	return &AppBlocker{
-		foreground:     tracker,
-		killer:         killer,
-		safetyVerifier: GetGlobalSafetyVerifier(),
-		auditLogger:    NewSafetyAuditLogger(500),
+		foreground:       tracker,
+		killer:           killer,
+		safetyVerifier:   GetGlobalSafetyVerifier(),
+		killLoopDetector: NewKillLoopDetector(),
+		auditLogger:      NewSafetyAuditLogger(500),
 	}
 }
 
@@ -121,6 +125,18 @@ func (ab *AppBlocker) Start(allowedExecs []string, closeOnActivate []string, int
 							Target:  activity.ExecName,
 							Source:  "blocker-safety-verifier",
 							Message: reason,
+						})
+						continue
+					}
+
+					// Kill loop detection — prevent rapid re-kill cycles
+					if ab.killLoopDetector.RecordKill(safeExec) {
+						log.Printf("[blocker] 🚫 KILL LOOP DETECTED for %s (exec=%s) — stopping attempts", activity.AppName, activity.ExecName)
+						ab.auditLogger.Log(SafetyEvent{
+							Type:    EventKillBlocked,
+							Target:  activity.ExecName,
+							Source:  "blocker-kill-loop-detector",
+							Message: "kill loop detected after " + strconv.Itoa(MaxConsecutiveKills) + " attempts",
 						})
 						continue
 					}

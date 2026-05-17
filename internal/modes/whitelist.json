@@ -37,7 +37,8 @@
       "Spotlight",
       "WindowManager",
       "WindowServer",
-      "launchd"
+      "launchd",
+      "loginwindow"
     ]
   },
 
@@ -86,7 +87,17 @@
       "roboty-dev",
       "roboty.exe",
       "roboty1.exe",
-      "roboty-dev.exe"
+      "roboty-dev.exe",
+      "msedgewebview2.exe",
+      "msedgewebview2",
+      "fontdrvhost.exe",
+      "fontdrvhost",
+      "LockApp.exe",
+      "LockApp",
+      "sihost.exe",
+      "sihost",
+      "mstsc.exe",
+      "mstsc"
     ],
 
     "ui_shell": [
@@ -115,6 +126,7 @@
       "mutter",
       "kwin",
       "plasmashell",
+      "sway",
       "Xorg",
       "Xwayland",
       "wayland",
@@ -156,3 +168,4 @@
     "kthreadd"
   ]
 }
+

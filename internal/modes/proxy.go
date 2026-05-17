@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// proxyLoopTimeout is the maximum lifetime of a CONNECT tunnel transfer.
+const proxyLoopTimeout = 60 * time.Second
+
 const DefaultProxyPort = 62828
 
 type loggingListener struct {
@@ -109,15 +112,24 @@ func (ub *URLBlocker) Start(port int, allowedURLs []string) error {
 	}
 
 	// First-time start
-	ub.port = port
 	ub.allowedURLs = normalized
 	ub.passThrough = false
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		ub.mu.Unlock()
-		return fmt.Errorf("proxy listen on %s: %w", addr, err)
+		log.Printf("[proxy] ⚠️ Port %d unavailable (%v) — trying random port", port, err)
+		listener, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			ub.mu.Unlock()
+			return fmt.Errorf("proxy listen: %w", err)
+		}
+		actualPort := listener.Addr().(*net.TCPAddr).Port
+		ub.port = actualPort
+		addr = fmt.Sprintf("127.0.0.1:%d", actualPort)
+		log.Printf("[proxy] 🔄 Bound to random port %d instead", actualPort)
+	} else {
+		ub.port = port
 	}
 	ub.listener = listener
 
@@ -164,7 +176,7 @@ func (ub *URLBlocker) Start(port int, allowedURLs []string) error {
 		log.Printf("[proxy] ⚠️ URL blocking disabled: cannot set system proxy (%v). App blocking still active.", err)
 		return nil
 	}
-	log.Printf("[proxy] 🌐 System proxy set to 127.0.0.1:%d", port)
+	log.Printf("[proxy] 🌐 System proxy set to 127.0.0.1:%d", ub.port)
 
 	return nil
 }
@@ -295,8 +307,8 @@ func (ub *URLBlocker) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go transfer(dest, clientConn)
-	go transfer(clientConn, dest)
+	go transferTimed(dest, clientConn, proxyLoopTimeout)
+	go transferTimed(clientConn, dest, proxyLoopTimeout)
 }
 
 func (ub *URLBlocker) handleHTTPPlain(w http.ResponseWriter, r *http.Request) {
@@ -312,7 +324,15 @@ func (ub *URLBlocker) handleHTTPPlain(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[proxy] ✅ ALLOWED HTTP: %s", host)
 
-	transport := &http.Transport{}
+	transport := &http.Transport{
+		Proxy: nil, // Never use environment proxy — prevents proxy loops
+	}
+	// Ensure Host header is set correctly on the outgoing request.
+	// Go's http.Server sets r.Host from the incoming Host header, but
+	// the transport needs r.Host to match r.URL.Host for proper forwarding.
+	if r.Host == "" {
+		r.Host = r.URL.Host
+	}
 	resp, err := transport.RoundTrip(r)
 	if err != nil {
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
@@ -429,6 +449,25 @@ func transfer(dest io.WriteCloser, src io.ReadCloser) {
 	defer dest.Close()
 	defer src.Close()
 	io.Copy(dest, src)
+}
+
+func transferTimed(dest io.WriteCloser, src io.ReadCloser, timeout time.Duration) {
+	defer dest.Close()
+	defer src.Close()
+	if timeout <= 0 {
+		io.Copy(dest, src)
+		return
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(dest, src)
+		done <- err
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		log.Printf("[proxy] ⚠️ CONNECT tunnel timed out after %v", timeout)
+	}
 }
 
 const blockPageHTML = `<!DOCTYPE html>

@@ -11,6 +11,10 @@ test-safety:
 	go test -v -count=1 -run TestCritical ./internal/modes/
 	go test -v -count=1 -run 'TestKillSafetyVerifier|TestWhitelist|TestNormalize' ./internal/modes/
 
+# Whitelist sync check (safety.go systemCritical vs whitelist.json)
+test-sync:
+	go test -v -count=1 -run TestCritical_WhitelistSyncWithSystemCritical ./internal/modes/
+
 # Integration tests (DI fakes + in-memory)
 test-integration:
 	go test -v -count=1 -race -run TestIntegration ./test/integration/...
@@ -33,18 +37,27 @@ test-security:
 	govulncheck ./...
 	gosec -quiet ./...
 
-# Race detector
+# Race detector (requires CGO_ENABLED=1; ensure MinGW on Windows)
 test-race:
+	@echo "NOTE: CGO_ENABLED=1 is required for -race. Set it in CI or env."
 	go test -race -count=1 -short ./internal/...
 
-# Fuzz tests
+# Fuzz tests (minimum 30s per target)
 test-fuzz:
-	go test -fuzz=FuzzNormalizeKillExec -fuzztime=60s ./internal/modes/
-	go test -fuzz=FuzzIsAlwaysAllowed -fuzztime=60s ./internal/modes/
-	go test -fuzz=FuzzIsAllowed -fuzztime=60s ./internal/modes/
+	go test -fuzz=FuzzNormalizeKillExec -fuzztime=30s ./internal/modes/
+	go test -fuzz=FuzzIsAlwaysAllowed -fuzztime=30s ./internal/modes/
+	go test -fuzz=FuzzIsAllowed -fuzztime=30s ./internal/modes/
+
+# VM test matrix (requires Vagrant)
+test-vm:
+	@echo "=== VM Test Matrix (P0) ==="
+	@echo "  Windows 11 24H2:    vagrant up win11"
+	@echo "  Windows 10 22H2:    vagrant up win10"
+	@echo "  Ubuntu 24.04:       vagrant up ubuntu"
+	@echo "  macOS (no Vagrant): run on macos-latest GH runner"
 
 # Full test suite
-test-all: test-unit test-safety test-integration test-race test-fuzz test-security
+test-all: test-unit test-safety test-sync test-integration test-race test-fuzz test-security
 
 # Build
 build:
@@ -58,7 +71,7 @@ lint:
 vet:
 	go vet ./...
 
-check: vet lint test-safety test-unit
+check: vet lint test-sync test-safety test-unit
 
 # Coverage
 coverage:

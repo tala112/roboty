@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
       - name: Integration tests
         run: go test -v -race -count=1 -tags=integration ./test/integration/...
@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
       - name: E2E tests (Windows)
         run: go test -v -tags=e2e -run TestE2E_Windows ./test/e2e/
 
@@ -38,6 +38,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
       - name: E2E tests (macOS)
         run: go test -v -tags=e2e -run TestE2E_macOS ./test/e2e/

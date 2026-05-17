@@ -88,7 +88,7 @@ func TestWhitelist_ContainsAllPlatformEntries(t *testing.T) {
 	whitelist := GetWhitelistExecs()
 
 	// Windows critical
-	winRequired := []string{"explorer", "dwm", "svchost", "csrss", "lsass"}
+	winRequired := []string{"explorer", "dwm", "svchost", "csrss", "lsass", "msedgewebview2", "fontdrvhost", "lockapp"}
 	for _, name := range winRequired {
 		if !whitelist[name] {
 			t.Errorf("Windows critical process %q missing from whitelist", name)
@@ -96,7 +96,7 @@ func TestWhitelist_ContainsAllPlatformEntries(t *testing.T) {
 	}
 
 	// Linux critical (all lowercased by GetWhitelistExecs)
-	linuxRequired := []string{"systemd", "gnome-shell", "xorg", "dbus-daemon"}
+	linuxRequired := []string{"systemd", "gnome-shell", "xorg", "dbus-daemon", "sway"}
 	for _, name := range linuxRequired {
 		if !whitelist[name] {
 			t.Errorf("Linux critical process %q missing from whitelist", name)
@@ -104,7 +104,7 @@ func TestWhitelist_ContainsAllPlatformEntries(t *testing.T) {
 	}
 
 	// macOS critical
-	macRequired := []string{"finder", "dock", "windowmanager", "launchd"}
+	macRequired := []string{"finder", "dock", "windowmanager", "launchd", "loginwindow"}
 	for _, name := range macRequired {
 		if !whitelist[name] {
 			t.Errorf("macOS critical process %q missing from whitelist", name)
