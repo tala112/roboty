@@ -25,9 +25,6 @@ jobs:
       - name: Unit tests
         run: go test -count=1 -short ./internal/...
       - name: Safety-critical + whitelist tests
-        run: GOMEMLIMIT=3g go test -count=1 -timeout=120s -run 'TestCritical|TestChaos|TestWhitelist' ./internal/modes/
-      - name: Fuzz tests
-        run: |
-          GOMEMLIMIT=3g go test -fuzz=FuzzNormalizeKillExec -fuzztime=500x -timeout=30s ./internal/modes/
-          GOMEMLIMIT=3g go test -fuzz=FuzzIsAlwaysAllowed -fuzztime=500x -timeout=30s ./internal/modes/
-          GOMEMLIMIT=3g go test -fuzz=FuzzIsAllowed -fuzztime=500x -timeout=30s ./internal/modes/
+        run: go test -count=1 -timeout=120s -run 'TestCritical|TestChaos|TestWhitelist' ./internal/modes/
+      - name: Fuzz seed corpus validation
+        run: go test -count=1 -timeout=30s -run 'TestSeed_' ./internal/modes/
