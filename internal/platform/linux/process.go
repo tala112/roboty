@@ -78,6 +78,24 @@ func (p *LinuxPlatform) ListRunning() ([]types.ProcessInfo, error) {
 }
 
 func (p *LinuxPlatform) GetProcessName(pid int) (string, error) {
+	// Prefer /proc/pid/cmdline for full name (not truncated like comm).
+	// cmdline is NUL-separated; first element is the executable path.
+	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err == nil {
+		if idx := strings.IndexByte(string(cmdline), '\x00'); idx > 0 {
+			cmdline = cmdline[:idx]
+		}
+		name := strings.TrimSpace(string(cmdline))
+		if name != "" {
+			// Extract base name from full path
+			if i := strings.LastIndex(name, "/"); i >= 0 {
+				name = name[i+1:]
+			}
+			return name, nil
+		}
+	}
+
+	// Fall back to /proc/pid/comm (may be truncated to 15 chars)
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
 	if err != nil {
 		return "", err

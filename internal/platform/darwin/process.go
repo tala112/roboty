@@ -84,7 +84,13 @@ func (p *DarwinPlatform) GetProcessName(pid int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	name := strings.TrimSpace(string(out))
+	// ps on macOS returns the full executable path; extract the base name
+	if strings.Contains(name, "/") {
+		parts := strings.Split(name, "/")
+		name = parts[len(parts)-1]
+	}
+	return name, nil
 }
 
 func (p *DarwinPlatform) GetParentPID(pid int) (int, error) {
