@@ -7,6 +7,7 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+	"time"
 
 	syswin "golang.org/x/sys/windows"
 )
@@ -38,15 +39,49 @@ func (p *WindowsPlatform) Enable(proxyAddr string, port int) error {
 }
 
 func (p *WindowsPlatform) Disable() error {
+	// Notify before making changes — flushes any cached proxy state in running apps
+	notifyProxyChange()
+
+	// 1. Clear HKCU proxy values and the primary connection BLOBs that Windows
+	//    uses to restore proxy settings on network refresh / sleep-wake / DHCP renew.
 	psCmd := `Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyEnable" -Value 0 -Type DWord -Force; ` +
 		`Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyServer" -ErrorAction SilentlyContinue; ` +
-		`Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyBypass" -ErrorAction SilentlyContinue`
+		`Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyBypass" -ErrorAction SilentlyContinue; ` +
+		`Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections" -Name "DefaultConnectionSettings" -ErrorAction SilentlyContinue; ` +
+		`Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections" -Name "SavedLegacySettings" -ErrorAction SilentlyContinue`
 	cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("windows proxy disable: %w - %s", err, string(out))
 	}
+
+	// 2. Clear WinHTTP proxy (separate store used by Windows Update, system services).
+	//    Requires admin — failure is logged but non-fatal.
+	if err := exec.Command("netsh", "winhttp", "reset", "proxy").Run(); err != nil {
+		log.Printf("[proxy] netsh winhttp reset non-fatal: %v", err)
+	}
+
+	// Brief delay to let registry changes propagate before notification
+	time.Sleep(200 * time.Millisecond)
 	notifyProxyChange()
-	log.Println("[proxy] Windows system proxy disabled and ProxyServer cleared")
+
+	// 3. Verify the proxy is actually disabled
+	enabled, err := p.IsEnabled()
+	if err != nil {
+		log.Printf("[proxy] Disable verification error (non-fatal): %v", err)
+	} else if enabled {
+		log.Println("[proxy] ⚠️ Proxy still shows enabled after primary disable — retrying")
+		retryCmd := `Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyEnable" -Value 0 -Type DWord -Force`
+		if retryOut, retryErr := exec.Command("powershell", "-NoProfile", "-Command", retryCmd).CombinedOutput(); retryErr != nil {
+			return fmt.Errorf("windows proxy disable retry: %w - %s", retryErr, string(retryOut))
+		}
+		time.Sleep(200 * time.Millisecond)
+		notifyProxyChange()
+		if enabled2, _ := p.IsEnabled(); enabled2 {
+			return fmt.Errorf("proxy remains enabled after retry")
+		}
+	}
+
+	log.Println("[proxy] Windows proxy fully disabled (registry, BLOBs, WinHTTP cleared)")
 	return nil
 }
 
