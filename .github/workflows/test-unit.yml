@@ -31,10 +31,10 @@ jobs:
         run: |
           echo "CGO_ENABLED=$(go env CGO_ENABLED)"
           if command -v gcc &>/dev/null; then echo "gcc=yes"; else echo "gcc=no"; fi
-      - name: Build
-        run: go build -v ./...
-      - name: Vet
-        run: go vet ./...
+      - name: Build (internal only — frontend embed requires frontend dist)
+        run: go build -v ./internal/...
+      - name: Vet (internal only — frontend embed requires frontend dist)
+        run: go vet ./internal/...
       - name: Unit tests (with race detector when available)
         shell: bash
         run: |

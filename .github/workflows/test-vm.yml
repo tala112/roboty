@@ -23,8 +23,8 @@ jobs:
         run: |
           go env CGO_ENABLED
           where gcc 2>$null; if ($?) { Write-Output "gcc available" } else { Write-Output "WARNING: no gcc — race tests require MinGW" }
-      - name: Vet
-        run: go vet ./...
+      - name: Vet (internal only — frontend embed requires frontend dist)
+        run: go vet ./internal/...
       - name: Safety-critical tests
         run: go test -v -count=1 -run 'TestCritical|TestChaos|TestWhitelist' ./internal/modes/
       - name: Race detector (requires CGO_ENABLED=1 + MinGW)
