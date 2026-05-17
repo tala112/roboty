@@ -15,7 +15,7 @@ import (
 
 type ModeService struct {
 	database     *db.DB
-	queries     *db.Queries
+	queries     FocusDataStore
 	ctx         context.Context
 	mu          sync.Mutex
 	timers      map[string]*time.Timer
@@ -23,9 +23,12 @@ type ModeService struct {
 	tracker     *ForegroundTracker
 	appBlocker  *AppBlocker
 	urlBlocker  *URLBlocker
+	killer      ProcessKiller
+	proxyMgr    SystemProxyManager
+	notifMgr    NotificationManager
 }
 
-func NewModeService(database *db.DB, queries *db.Queries) *ModeService {
+func NewModeService(database *db.DB, queries FocusDataStore) *ModeService {
 	tracker := NewForegroundTracker()
 	return &ModeService{
 		database:    database,
@@ -34,6 +37,30 @@ func NewModeService(database *db.DB, queries *db.Queries) *ModeService {
 		tracker:    tracker,
 		appBlocker: NewAppBlocker(tracker),
 		urlBlocker: NewURLBlocker(),
+		killer:     NewRealProcessKiller(),
+		proxyMgr:   NewRealProxyManager(),
+		notifMgr:   NewRealNotificationManager(),
+	}
+}
+
+func NewModeServiceWithDI(
+	database *db.DB,
+	queries FocusDataStore,
+	tracker *ForegroundTracker,
+	killer ProcessKiller,
+	proxyMgr SystemProxyManager,
+	notifMgr NotificationManager,
+) *ModeService {
+	return &ModeService{
+		database:    database,
+		queries:    queries,
+		timers:     make(map[string]*time.Timer),
+		tracker:    tracker,
+		appBlocker: NewAppBlockerWithDI(tracker, killer),
+		urlBlocker: NewURLBlockerWithDI(proxyMgr, NewFileStateManager()),
+		killer:     killer,
+		proxyMgr:   proxyMgr,
+		notifMgr:   notifMgr,
 	}
 }
 
@@ -67,21 +94,70 @@ func (s *ModeService) InitFocusSchema() error {
 	return nil
 }
 
+// EmergencyStop performs an immediate, safe shutdown of all active focus mode
+// subsystems. Called by the watchdog failsafe or when critical failures are detected.
+func (s *ModeService) EmergencyStop(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	log.Printf("[modes] 🚨 EMERGENCY STOP triggered: %s", reason)
+
+	// Stop app blocker immediately
+	s.appBlocker.Stop()
+
+	// Stop URL blocker and disable system proxy
+	if err := s.urlBlocker.Stop(); err != nil {
+		log.Printf("[modes] ⚠️ EmergencyStop: URLBlocker stop warning: %v", err)
+	}
+
+	// Restore notifications
+	if s.notifMuted {
+		RestoreNotifications()
+		s.notifMuted = false
+	}
+
+	// Complete all active sessions
+	if s.queries != nil {
+		sessions, err := s.queries.GetAllFocusSessions(context.Background())
+		if err == nil {
+			for _, session := range sessions {
+				if session.Status == "active" {
+					modeName := session.ModeID
+					if mode, err := s.queries.GetFocusModeByID(context.Background(), session.ModeID); err == nil && mode != nil {
+						modeName = mode.Name
+					}
+					s.queries.UpdateFocusSessionStatus(context.Background(), session.ID, "emergency_stopped")
+					log.Printf("[modes] Emergency stop: terminated session %s (mode: %q)", session.ID, modeName)
+				}
+			}
+		}
+	}
+
+	log.Printf("[modes] ✅ Emergency stop complete: %s", reason)
+}
+
 func (s *ModeService) CheckResumeSessions() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Clean up orphaned proxy settings from previous crash
+	CleanupOrphanedProxy()
 
 	session, err := s.queries.GetActiveFocusSession(context.Background())
 	if err != nil || session == nil {
 		return
 	}
 
-	log.Printf("[modes] Found active session %s for mode %s, checking status...", session.ID, session.ModeID)
+	modeName := session.ModeID
+	if mode, err := s.queries.GetFocusModeByID(context.Background(), session.ModeID); err == nil && mode != nil {
+		modeName = mode.Name
+	}
+	log.Printf("[modes] 🔄 Found active session %s (mode: %q), checking status...", session.ID, modeName)
 
 	if session.EndsAt != nil {
 		endTime, err := time.Parse("2006-01-02 15:04:05", session.EndsAt.String())
 		if err == nil && time.Now().After(endTime) {
-			log.Printf("[modes] Session timer expired, auto-deactivating")
+			log.Printf("[modes] ⏰ Session timer already expired for %q — auto-deactivating", modeName)
 			s.queries.UpdateFocusSessionStatus(context.Background(), session.ID, "completed")
 			s.appBlocker.Stop()
 			s.urlBlocker.Stop()
@@ -93,7 +169,7 @@ func (s *ModeService) CheckResumeSessions() {
 		}
 		remaining := time.Until(endTime)
 		if remaining > 0 {
-			log.Printf("[modes] Resuming session timer, %v remaining", remaining)
+			log.Printf("[modes] 🔄 Resuming session timer for %q, %v remaining", modeName, remaining)
 			s.startTimer(session.ID, session.ModeID, remaining)
 		}
 	}
@@ -139,7 +215,28 @@ func (s *ModeService) GetMode(id string) (*FocusMode, error) {
 	return &result, nil
 }
 
+// validateAppExec checks that an app exec name is safe to store and potentially kill.
+// Returns a user-friendly error if the name is dangerous or system-critical.
+func validateAppExec(appExec, appName string) error {
+	safeExec := NormalizeKillExec(appExec)
+	if safeExec == "" {
+		return fmt.Errorf("app exec %q is invalid or contains dangerous characters", appExec)
+	}
+	safe, reason := GetGlobalSafetyVerifier().IsSafeToKill(safeExec)
+	if !safe {
+		return fmt.Errorf("cannot add %q (%s): %s", appName, appExec, reason)
+	}
+	return nil
+}
+
 func (s *ModeService) CreateMode(req CreateModeRequest) (*FocusMode, error) {
+	// Validate all app execs before creating
+	for _, app := range req.Apps {
+		if err := validateAppExec(app.AppExec, app.AppName); err != nil {
+			return nil, err
+		}
+	}
+
 	id := uuid.New().String()
 	params := db.CreateFocusModeParams{
 		ID:                id,
@@ -314,9 +411,26 @@ func (s *ModeService) ActivateMode(modeID string) (*FocusSession, error) {
 		allowedExecs = append(allowedExecs, strings.ToLower(a.AppExec))
 	}
 
+	if len(allowedExecs) > 0 {
+		log.Printf("[modes] Allowed apps: %v", allowedExecs)
+	} else {
+		log.Printf("[modes] ⚠️ No allowed apps — all non-whitelisted apps will be blocked")
+	}
+
 	var closeAppsList []string
 	for _, a := range allApps {
 		if a.CloseOnActivate {
+			// SAFETY: Verify the exec name is safe before adding to close list
+			safeExec := NormalizeKillExec(a.AppExec)
+			if safeExec == "" {
+				log.Printf("[modes] SKIP closeOnActivate for %q: rejected by NormalizeKillExec", a.AppExec)
+				continue
+			}
+			safe, reason := GetGlobalSafetyVerifier().IsSafeToKill(safeExec)
+			if !safe {
+				log.Printf("[modes] SAFETY BLOCKED closeOnActivate for %q: %s", a.AppExec, reason)
+				continue
+			}
 			closeAppsList = append(closeAppsList, a.AppExec)
 			// Always allow apps that close on activate (they get killed and stay dead)
 		}
@@ -327,19 +441,29 @@ func (s *ModeService) ActivateMode(modeID string) (*FocusSession, error) {
 		CloseApps(closeAppsList)
 	}
 
-	// Start continuous app blocker
-	// Re-checks foreground every 2 seconds and blocks anything not in allowed list
+	// Stop any existing blocker/proxy before (re)starting with new config
+	s.appBlocker.Stop()
 	s.appBlocker.Start(allowedExecs, closeAppsList, 2*time.Second)
 
 	// Start URL blocker (whitelist mode — block ALL except allowed)
-	allowedURLs, _ := s.queries.GetFocusModeURLsByModeID(context.Background(), modeID)
+	allowedURLs, err := s.queries.GetFocusModeURLsByModeID(context.Background(), modeID)
+	if err != nil {
+		return nil, fmt.Errorf("get allowed URLs for mode %s: %w", modeID, err)
+	}
 	urlStrs := make([]string, 0, len(allowedURLs))
 	for _, u := range allowedURLs {
 		urlStrs = append(urlStrs, u.URL)
 	}
 	if len(urlStrs) > 0 {
+		log.Printf("[modes] Allowed URLs: %v", urlStrs)
+	} else {
+		log.Printf("[modes] No allowed URLs configured — no URL blocking")
+	}
+	// Always stop existing proxy first to ensure clean state + port reuse
+	s.urlBlocker.Stop()
+	if len(urlStrs) > 0 {
 		if err := s.urlBlocker.Start(DefaultProxyPort, urlStrs); err != nil {
-			log.Printf("[modes] Failed to start URL blocker: %v", err)
+			log.Printf("[modes] Failed to start URL blocker: %v — app blocking still active", err)
 		}
 	}
 
@@ -374,8 +498,12 @@ func (s *ModeService) ActivateMode(modeID string) (*FocusSession, error) {
 		s.startTimer(sessionID, modeID, duration)
 	}
 
-	log.Printf("[modes] Activated mode %s, session %s, %d allowed apps, %d allowed URLs",
-		m.Name, sessionID, len(allowedExecs), len(urlStrs))
+	durationStr := "no limit"
+	if m.DurationMinutes > 0 {
+		durationStr = fmt.Sprintf("%dm", m.DurationMinutes)
+	}
+	log.Printf("[modes] 🔵 MODE STARTED: %q (session: %s, apps: %d, urls: %d, duration: %s)",
+		m.Name, sessionID, len(allowedExecs), len(urlStrs), durationStr)
 
 	return &FocusSession{
 		ID:        session.ID,
@@ -395,9 +523,17 @@ func (s *ModeService) DeactivateMode(sessionID string) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 
+	// Get mode name before cleanup for logging
+	modeName := session.ModeID
+	if mode, err := s.queries.GetFocusModeByID(context.Background(), session.ModeID); err == nil && mode != nil {
+		modeName = mode.Name
+	}
+
+	log.Printf("[modes] 🟢 MODE ENDING: %q (session: %s)", modeName, sessionID)
+
 	_, err = s.queries.UpdateFocusSessionStatus(context.Background(), sessionID, "completed")
 	if err != nil {
-		return fmt.Errorf("update session: %w", err)
+		log.Printf("[modes] Failed to update session status: %v", err)
 	}
 
 	// Stop timers
@@ -409,9 +545,9 @@ func (s *ModeService) DeactivateMode(sessionID string) error {
 	// Stop continuous app blocker
 	s.appBlocker.Stop()
 
-	// Stop URL blocker
+	// Stop URL blocker — always attempt, log failures but don't abort cleanup
 	if err := s.urlBlocker.Stop(); err != nil {
-		log.Printf("[modes] Failed to stop URL blocker: %v", err)
+		log.Printf("[modes] ⚠️ URL blocker stop warning: %v", err)
 	}
 
 	// Restore notifications
@@ -420,7 +556,7 @@ func (s *ModeService) DeactivateMode(sessionID string) error {
 		s.notifMuted = false
 	}
 
-	log.Printf("[modes] Deactivated session %s", sessionID)
+	log.Printf("[modes] 🟢 MODE ENDED: %q (session: %s)", modeName, sessionID)
 	return nil
 }
 
@@ -589,13 +725,20 @@ func (s *ModeService) disableOtherModes(keepID string) {
 func (s *ModeService) deactivateIfActive(modeID string) {
 	session, err := s.queries.GetActiveFocusSession(context.Background())
 	if err == nil && session != nil && session.ModeID == modeID {
+		modeName := modeID
+		if mode, err := s.queries.GetFocusModeByID(context.Background(), modeID); err == nil && mode != nil {
+			modeName = mode.Name
+		}
+		log.Printf("[modes] 🟢 MODE CANCELLED: %q (session: %s)", modeName, session.ID)
 		s.queries.UpdateFocusSessionStatus(context.Background(), session.ID, "cancelled")
 		if timer, ok := s.timers[modeID]; ok {
 			timer.Stop()
 			delete(s.timers, modeID)
 		}
 		s.appBlocker.Stop()
-		s.urlBlocker.Stop()
+		if err := s.urlBlocker.Stop(); err != nil {
+			log.Printf("[modes] ⚠️ URL blocker stop warning on deactivate: %v", err)
+		}
 		if s.notifMuted {
 			RestoreNotifications()
 			s.notifMuted = false
@@ -608,17 +751,27 @@ func (s *ModeService) startTimer(sessionID, modeID string, duration time.Duratio
 		timer.Stop()
 	}
 	s.timers[modeID] = time.AfterFunc(duration, func() {
-		log.Printf("[modes] Timer expired for mode %s session %s", modeID, sessionID)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
-		_, err := s.queries.UpdateFocusSessionStatus(context.Background(), sessionID, "completed")
+		// Get mode name for logging
+		modeName := modeID
+		existing, err := s.queries.GetFocusModeByID(context.Background(), modeID)
+		if err == nil && existing != nil {
+			modeName = existing.Name
+		}
+
+		log.Printf("[modes] ⏰ MODE TIMER EXPIRED: %q (session: %s)", modeName, sessionID)
+
+		_, err = s.queries.UpdateFocusSessionStatus(context.Background(), sessionID, "completed")
 		if err != nil {
 			log.Printf("[modes] Failed to complete session %s: %v", sessionID, err)
 		}
 
 		s.appBlocker.Stop()
-		s.urlBlocker.Stop()
+		if err := s.urlBlocker.Stop(); err != nil {
+			log.Printf("[modes] ⚠️ URL blocker stop warning on timer expiry: %v", err)
+		}
 
 		if s.notifMuted {
 			RestoreNotifications()
@@ -635,8 +788,7 @@ func (s *ModeService) startTimer(sessionID, modeID string, duration time.Duratio
 			Icon:             "",
 			Color:            "",
 		}
-		existing, err := s.queries.GetFocusModeByID(context.Background(), modeID)
-		if err == nil && existing != nil {
+		if existing != nil {
 			upd.Name = existing.Name
 			upd.Description = existing.Description
 			upd.DurationMinutes = existing.DurationMinutes
@@ -648,6 +800,10 @@ func (s *ModeService) startTimer(sessionID, modeID string, duration time.Duratio
 		}
 
 		delete(s.timers, modeID)
-		log.Printf("[modes] Timer auto-deactivated mode %s", modeID)
+		log.Printf("[modes] ✅ Mode auto-deactivated: %q", modeName)
 	})
+}
+
+func (s *ModeService) GetURLBlockerRunning() bool {
+	return s.urlBlocker.IsRunning()
 }

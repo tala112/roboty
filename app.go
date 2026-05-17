@@ -101,6 +101,11 @@ func (a *App) InitDatabase() error {
 	a.queries = db.NewQueries(database.DB())
 
 	a.modeService = modes.NewModeService(a.database, a.queries)
+
+	// Wire global emergency callback (used by safeGo panic recovery and signal handler)
+	modes.SetGlobalEmergencyCallback(a.modeService.EmergencyStop)
+	modes.SetupSignalHandler()
+
 	if err := a.modeService.InitFocusSchema(); err != nil {
 		log.Printf("[WARN] Failed to init focus schema: %v", err)
 	}
@@ -685,5 +690,6 @@ func (a *App) GetURLBlockerStatus() string {
 	if a.modeService == nil {
 		return `{"running":false}`
 	}
-	return `{"running":false}`
+	running := a.modeService.GetURLBlockerRunning()
+	return fmt.Sprintf(`{"running":%v}`, running)
 }

@@ -80,6 +80,10 @@ FROM focus_mode_sessions WHERE id = $1`
 SELECT id, mode_id, started_at, ends_at, finished_at, status, created_at
 FROM focus_mode_sessions WHERE status = 'active' ORDER BY started_at DESC LIMIT 1`
 
+	getAllFocusSessions = `
+SELECT id, mode_id, started_at, ends_at, finished_at, status, created_at
+FROM focus_mode_sessions ORDER BY started_at ASC`
+
 	getLatestSessionByModeID = `
 SELECT id, mode_id, started_at, ends_at, finished_at, status, created_at
 FROM focus_mode_sessions WHERE mode_id = $1 ORDER BY started_at DESC LIMIT 1`
@@ -293,6 +297,26 @@ func (q *Queries) GetActiveFocusSession(ctx context.Context) (*FocusModeSession,
 		return nil, nil
 	}
 	return &s, err
+}
+
+func (q *Queries) GetAllFocusSessions(ctx context.Context) ([]FocusModeSession, error) {
+	rows, err := q.db.QueryContext(ctx, getAllFocusSessions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sessions []FocusModeSession
+	for rows.Next() {
+		var s FocusModeSession
+		err := rows.Scan(
+			&s.ID, &s.ModeID, &s.StartedAt, &s.EndsAt, &s.FinishedAt, &s.Status, &s.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, s)
+	}
+	return sessions, rows.Err()
 }
 
 func (q *Queries) GetLatestSessionByModeID(ctx context.Context, modeID string) (*FocusModeSession, error) {

@@ -7,6 +7,11 @@ import (
 )
 
 func MuteNotifications() {
+	if IsDevMode() {
+		log.Println("[dev] WOULD mute notifications (registry, busctl, osascript)")
+		return
+	}
+	saveNotificationState()
 	switch runtime.GOOS {
 	case "linux":
 		muteNotificationsLinux()
@@ -18,6 +23,11 @@ func MuteNotifications() {
 }
 
 func RestoreNotifications() {
+	if IsDevMode() {
+		log.Println("[dev] WOULD restore notifications")
+		return
+	}
+	clearNotificationState()
 	switch runtime.GOOS {
 	case "linux":
 		restoreNotificationsLinux()

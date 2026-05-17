@@ -47,7 +47,14 @@ func GetWhitelistExecs() map[string]bool {
 func collectExecs(v interface{}, set *map[string]bool) {
 	switch val := v.(type) {
 	case string:
-		(*set)[strings.ToLower(val)] = true
+		lower := strings.ToLower(val)
+		(*set)[lower] = true
+		// Also add normalized form without .exe (matches tracker output)
+		(*set)[strings.TrimSuffix(lower, ".exe")] = true
+		// Also add form with .exe (matches taskkill input)
+		if !strings.HasSuffix(lower, ".exe") && !strings.ContainsAny(lower, ".") {
+			(*set)[lower+".exe"] = true
+		}
 	case []interface{}:
 		for _, item := range val {
 			collectExecs(item, set)

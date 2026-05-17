@@ -168,13 +168,26 @@ func TestGetWhitelistExecs(t *testing.T) {
 	}
 }
 
-// startProxyOnPort starts a URLBlocker on the given port for testing
-func startProxyOnPort(t *testing.T, port int, allowed []string) *URLBlocker {
+// getFreePort asks the OS for a free TCP port on 127.0.0.1
+func getFreePort(t *testing.T) int {
 	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("getFreePort: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+	return port
+}
+
+// startProxyOnPort starts a URLBlocker on a free port for testing
+func startProxyOnPort(t *testing.T, allowed []string) *URLBlocker {
+	t.Helper()
+	port := getFreePort(t)
 	ub := NewURLBlocker()
 	err := ub.Start(port, allowed)
 	if err != nil {
-		t.Fatalf("Start failed on port %d: %v", port, err)
+		t.Fatalf("Start failed: %v", err)
 	}
 	t.Cleanup(func() { ub.Stop() })
 	return ub
@@ -208,14 +221,15 @@ func sendHTTPProxyReq(t *testing.T, port int, targetURL string) (int, string) {
 
 // Test URLBlocker lifecycle: start/stop and verify it serves on the port
 func TestURLBlocker_StartStop(t *testing.T) {
-	ub := startProxyOnPort(t, 62829, []string{"example.com"})
+	ub := startProxyOnPort(t, []string{"example.com"})
+	port := ub.port
 
 	if !ub.IsRunning() {
 		t.Fatal("URLBlocker should be running after Start")
 	}
 
 	// HTTP proxy request to an allowed host
-	code, body := sendHTTPProxyReq(t, 62829, "example.com")
+	code, body := sendHTTPProxyReq(t, port, "example.com")
 	if code == http.StatusOK || code == http.StatusBadGateway {
 		t.Logf("Allowed request returned status %d (expected forward or bad gateway)", code)
 	} else if code == 0 {
@@ -226,7 +240,7 @@ func TestURLBlocker_StartStop(t *testing.T) {
 	_ = body
 
 	// HTTP proxy request to a blocked host
-	code, body = sendHTTPProxyReq(t, 62829, "blocked-site.com")
+	code, body = sendHTTPProxyReq(t, port, "blocked-site.com")
 	if code == http.StatusForbidden {
 		t.Log("Blocked request correctly returned 403 Forbidden")
 	} else if code == 0 {
@@ -251,10 +265,10 @@ func TestURLBlocker_StartStop(t *testing.T) {
 
 // Test URLBlocker with empty allowed list — should block everything
 func TestURLBlocker_BlockAll(t *testing.T) {
-	_ = startProxyOnPort(t, 62830, nil)
+	ub := startProxyOnPort(t, nil)
 
 	// HTTP proxy request to any host — should get 403
-	code, _ := sendHTTPProxyReq(t, 62830, "any-site.com")
+	code, _ := sendHTTPProxyReq(t, ub.port, "any-site.com")
 	if code == http.StatusForbidden {
 		t.Log("Block-all proxy correctly returned 403 Forbidden")
 	} else if code == 0 {
@@ -266,10 +280,10 @@ func TestURLBlocker_BlockAll(t *testing.T) {
 
 // Test URLBlocker allows the configured host
 func TestURLBlocker_AllowConfiguredHost(t *testing.T) {
-	_ = startProxyOnPort(t, 62831, []string{"allowed-site.com"})
+	ub := startProxyOnPort(t, []string{"allowed-site.com"})
 
 	// Request to allowed host should NOT be forbidden
-	code, _ := sendHTTPProxyReq(t, 62831, "allowed-site.com")
+	code, _ := sendHTTPProxyReq(t, ub.port, "allowed-site.com")
 	if code == http.StatusForbidden {
 		t.Error("Allowed site should not be blocked")
 	} else if code == 0 {
@@ -279,7 +293,7 @@ func TestURLBlocker_AllowConfiguredHost(t *testing.T) {
 	}
 
 	// Request to other host should be 403
-	code, _ = sendHTTPProxyReq(t, 62831, "other-site.com")
+	code, _ = sendHTTPProxyReq(t, ub.port, "other-site.com")
 	if code == http.StatusForbidden {
 		t.Log("Non-allowed site correctly blocked")
 	} else if code == 0 {
@@ -436,6 +450,144 @@ func TestWindowsSystemProxyCommands(t *testing.T) {
 		t.Errorf("Disable proxy command syntax invalid: %v\nOutput: %s", err, string(out))
 	} else {
 		t.Logf("Disable proxy -WhatIf OK: %s", strings.TrimSpace(string(out)))
+	}
+}
+
+// TestURLBlocker_Lifecycle_StartStopRestart verifies the full proxy lifecycle:
+// start → stop → restart with new config → stop.
+func TestURLBlocker_Lifecycle_StartStopRestart(t *testing.T) {
+	fakeProxy := newFakeProxyManager()
+	fakeState := newFakeStateFileManager()
+	port := getFreePort(t)
+
+	ub := NewURLBlockerWithDI(fakeProxy, fakeState)
+
+	// Phase 1: Start with blocklist A
+	err := ub.Start(port, []string{"example.com", "github.com"})
+	if err != nil {
+		t.Fatalf("phase 1 Start failed: %v", err)
+	}
+	if !ub.IsRunning() {
+		t.Fatal("phase 1: should be running after Start")
+	}
+	if !fakeProxy.enabled {
+		t.Error("phase 1: system proxy should be enabled")
+	}
+	if !fakeState.StateExists(proxyStateName) {
+		t.Error("phase 1: state file should exist")
+	}
+	if !ub.isAllowed("example.com") {
+		t.Error("phase 1: example.com should be allowed")
+	}
+	if !ub.isAllowed("api.github.com") {
+		t.Error("phase 1: api.github.com should be allowed")
+	}
+
+	// Phase 2: Stop
+	err = ub.Stop()
+	if err != nil {
+		t.Fatalf("phase 2 Stop failed: %v", err)
+	}
+	if ub.IsRunning() {
+		t.Fatal("phase 2: should not be running after Stop")
+	}
+	if fakeProxy.enabled {
+		t.Error("phase 2: system proxy should be disabled")
+	}
+	if fakeState.StateExists(proxyStateName) {
+		t.Error("phase 2: state file should be cleared")
+	}
+
+	// Phase 3: Restart with different blocklist B (different port to avoid conflict)
+	port2 := getFreePort(t)
+	err = ub.Start(port2, []string{"stackoverflow.com"})
+	if err != nil {
+		t.Fatalf("phase 3 Start failed: %v", err)
+	}
+	if !ub.IsRunning() {
+		t.Fatal("phase 3: should be running after restart")
+	}
+	if !fakeProxy.enabled {
+		t.Error("phase 3: system proxy should be enabled")
+	}
+	// Old URLs must NOT be allowed
+	if ub.isAllowed("example.com") {
+		t.Error("phase 3: example.com should NOT be allowed after restart with new config")
+	}
+	// New URL must be allowed
+	if !ub.isAllowed("stackoverflow.com") {
+		t.Error("phase 3: stackoverflow.com should be allowed")
+	}
+	// Localhost must always be allowed
+	if !ub.isAllowed("localhost") {
+		t.Error("phase 3: localhost must always be allowed")
+	}
+
+	// Phase 4: Final stop
+	err = ub.Stop()
+	if err != nil {
+		t.Fatalf("phase 4 Stop failed: %v", err)
+	}
+	if ub.IsRunning() {
+		t.Fatal("phase 4: should not be running after final stop")
+	}
+	if fakeProxy.enabled {
+		t.Error("phase 4: system proxy should be disabled")
+	}
+	if fakeState.StateExists(proxyStateName) {
+		t.Error("phase 4: state file should be cleared")
+	}
+}
+
+// TestURLBlocker_Lifecycle_IdempotentStop verifies that multiple Stop calls are safe.
+func TestURLBlocker_Lifecycle_IdempotentStop(t *testing.T) {
+	fakeProxy := newFakeProxyManager()
+	fakeState := newFakeStateFileManager()
+
+	ub := NewURLBlockerWithDI(fakeProxy, fakeState)
+	port := getFreePort(t)
+	if err := ub.Start(port, nil); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Call Stop multiple times — must not panic or error
+	for i := 0; i < 5; i++ {
+		err := ub.Stop()
+		if err != nil {
+			t.Errorf("Stop iteration %d: unexpected error: %v", i, err)
+		}
+	}
+
+	if ub.IsRunning() {
+		t.Error("should not be running after Stop")
+	}
+}
+
+// TestURLBlocker_Lifecycle_StartTwiceNoop verifies that Start when already running
+// updates the URL config (via Stop+Start, not silently ignoring).
+func TestURLBlocker_Lifecycle_StartUpdatesConfig(t *testing.T) {
+	fakeProxy := newFakeProxyManager()
+	fakeState := newFakeStateFileManager()
+
+	ub := NewURLBlockerWithDI(fakeProxy, fakeState)
+	port := getFreePort(t)
+
+	// First start with config A
+	if err := ub.Start(port, []string{"old-site.com"}); err != nil {
+		t.Fatalf("first Start failed: %v", err)
+	}
+
+	// Simulate ActivateMode's current pattern: Stop then Start with config B
+	ub.Stop()
+	if err := ub.Start(port, []string{"new-site.com"}); err != nil {
+		t.Fatalf("second Start failed: %v", err)
+	}
+
+	if ub.isAllowed("old-site.com") {
+		t.Error("old-site.com should NOT be allowed after Stop+Start with new config")
+	}
+	if !ub.isAllowed("new-site.com") {
+		t.Error("new-site.com should be allowed after Stop+Start with new config")
 	}
 }
 

@@ -7,67 +7,164 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const DefaultProxyPort = 62828
 
+type loggingListener struct {
+	net.Listener
+	addr string
+}
+
+type debugConn struct {
+	net.Conn
+	once sync.Once
+}
+
+func (dc *debugConn) Read(b []byte) (int, error) {
+	n, err := dc.Conn.Read(b)
+	dc.once.Do(func() {
+		if n > 0 {
+			dump := make([]byte, n)
+			copy(dump, b[:n])
+			log.Printf("[proxy] 📦 RAW (%d bytes): %x", n, dump)
+			log.Printf("[proxy] 📝 TEXT: %q", string(dump))
+		}
+	})
+	return n, err
+}
+
+func (ll *loggingListener) Accept() (net.Conn, error) {
+	conn, err := ll.Listener.Accept()
+	if err == nil {
+		log.Printf("[proxy] 🔌 TCP CONNECTION from %s", conn.RemoteAddr())
+		conn = &debugConn{Conn: conn}
+	}
+	return conn, err
+}
+
 type URLBlocker struct {
 	port        int
 	allowedURLs []string
+	passThrough bool
 	listener    net.Listener
 	server      *http.Server
 	running     bool
+	ready       chan struct{}
 	mu          sync.Mutex
+	proxyMgr    SystemProxyManager
+	stateFile   StateFileManager
+	epoch       int64
 }
 
 func NewURLBlocker() *URLBlocker {
 	return &URLBlocker{
-		port: DefaultProxyPort,
+		port:      DefaultProxyPort,
+		proxyMgr:  NewRealProxyManager(),
+		stateFile: NewFileStateManager(),
+	}
+}
+
+func NewURLBlockerWithDI(proxyMgr SystemProxyManager, stateFile StateFileManager) *URLBlocker {
+	return &URLBlocker{
+		port:      DefaultProxyPort,
+		proxyMgr:  proxyMgr,
+		stateFile: stateFile,
 	}
 }
 
 func (ub *URLBlocker) Start(port int, allowedURLs []string) error {
-	ub.mu.Lock()
-	defer ub.mu.Unlock()
+	normalized := normalizeURLs(allowedURLs)
+	log.Printf("[proxy] Normalized allow-list: %v (from raw: %v)", normalized, allowedURLs)
 
-	if ub.running {
+	ub.mu.Lock()
+
+	// Already running in normal mode — just refresh URL config
+	if ub.running && !ub.passThrough {
+		ub.allowedURLs = normalized
+		ub.mu.Unlock()
 		return nil
 	}
 
+	// Running in pass-through mode — update config and retry system proxy
+	if ub.running && ub.passThrough {
+		ub.passThrough = false
+		ub.allowedURLs = normalized
+		ub.mu.Unlock()
+		if err := ub.enableSystemProxy(); err != nil {
+			log.Printf("[proxy] ⚠️ pass-through: still cannot set system proxy (%v) — staying in pass-through", err)
+			ub.mu.Lock()
+			ub.passThrough = true
+			ub.allowedURLs = nil
+			ub.mu.Unlock()
+		} else {
+			log.Printf("[proxy] 🔄 Recovered from pass-through — system proxy re-enabled")
+		}
+		return nil
+	}
+
+	// First-time start
 	ub.port = port
-	ub.allowedURLs = normalizeURLs(allowedURLs)
+	ub.allowedURLs = normalized
+	ub.passThrough = false
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
+		ub.mu.Unlock()
 		return fmt.Errorf("proxy listen on %s: %w", addr, err)
 	}
 	ub.listener = listener
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", ub.handleHTTP)
+	// Wrap in logging listener to trace incoming TCP connections
+	logLst := &loggingListener{Listener: listener, addr: addr}
 
+	errLog := log.New(log.Writer(), "[proxy:http] ", log.LstdFlags)
 	ub.server = &http.Server{
-		Handler: mux,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("[proxy] 🎯 DIRECT HANDLER: %s %s (Host=%s)", r.Method, r.RequestURI, r.Host)
+			ub.handleHTTP(w, r)
+		}),
+		ErrorLog: errLog,
 	}
+	ub.ready = make(chan struct{})
 	ub.running = true
+	startEpoch := atomic.AddInt64(&ub.epoch, 1)
+	ub.mu.Unlock()
 
-	go func() {
-		log.Printf("[proxy] starting on %s", addr)
-		if err := ub.server.Serve(listener); err != nil && err != http.ErrServerClosed {
+	go func(epoch int64, srv *http.Server, lst net.Listener) {
+		log.Printf("[proxy] 🟢 PROXY STARTED on %s", addr)
+		close(ub.ready)
+
+		if err := srv.Serve(lst); err != nil && err != http.ErrServerClosed {
 			log.Printf("[proxy] serve error: %v", err)
 		}
-	}()
 
-	// Enable system proxy settings
-	if err := ub.enableSystemProxy(); err != nil {
-		log.Printf("[proxy] failed to set system proxy: %v", err)
+		ub.mu.Lock()
+		if atomic.LoadInt64(&ub.epoch) == epoch {
+			ub.running = false
+		}
+		ub.mu.Unlock()
+	}(startEpoch, ub.server, logLst)
+
+	<-ub.ready
+
+	if len(normalized) > 0 {
+		log.Printf("[proxy] 🔒 Allow-list: %d URLs — all others will be blocked", len(normalized))
+	} else {
+		log.Printf("[proxy] ⚠️ No allowed URLs configured — ALL URLs will be blocked")
 	}
+
+	if err := ub.enableSystemProxy(); err != nil {
+		log.Printf("[proxy] ⚠️ URL blocking disabled: cannot set system proxy (%v). App blocking still active.", err)
+		return nil
+	}
+	log.Printf("[proxy] 🌐 System proxy set to 127.0.0.1:%d", port)
 
 	return nil
 }
@@ -80,22 +177,31 @@ func (ub *URLBlocker) Stop() error {
 		return nil
 	}
 
-	ub.running = false
+	var returnErr error
 
-	// Disable system proxy
 	if err := ub.disableSystemProxy(); err != nil {
-		log.Printf("[proxy] failed to disable system proxy: %v", err)
+		log.Printf("[proxy] ⚠️ proxy disable failed: %v — continuing shutdown", err)
+		returnErr = fmt.Errorf("disable system proxy: %w", err)
 	}
 
-	// Stop HTTP server
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := ub.server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("proxy shutdown: %w", err)
+	ub.running = false
+	ub.passThrough = false
+	ub.allowedURLs = nil
+
+	if ub.server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := ub.server.Shutdown(ctx); err != nil {
+			log.Printf("[proxy] shutdown error: %v", err)
+			if returnErr == nil {
+				returnErr = fmt.Errorf("proxy shutdown: %w", err)
+			}
+		}
+		ub.server = nil
 	}
 
-	log.Println("[proxy] stopped")
-	return nil
+	log.Println("[proxy] 🛑 PROXY STOPPED")
+	return returnErr
 }
 
 func (ub *URLBlocker) SetAllowedURLs(urls []string) {
@@ -110,24 +216,33 @@ func (ub *URLBlocker) IsRunning() bool {
 	return ub.running
 }
 
-// =============================================================================
-// Proxy Logic — block ALL sites except those in the allowed list
-// =============================================================================
+func (ub *URLBlocker) IsAllowed(host string) bool {
+	return ub.isAllowed(host)
+}
 
 func (ub *URLBlocker) isAllowed(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
-	// Strip port if present
-	if idx := strings.LastIndex(host, ":"); idx > 0 {
-		host = host[:idx]
+
+	if strings.Count(host, ":") == 1 {
+		if idx := strings.LastIndex(host, ":"); idx > 0 {
+			host = host[:idx]
+		}
 	}
-	// Strip trailing dot (FQDN form)
 	host = strings.TrimSuffix(host, ".")
 
+	if isAlwaysAllowed(host) {
+		return true
+	}
+
 	ub.mu.Lock()
+	passThrough := ub.passThrough
 	allowed := ub.allowedURLs
 	ub.mu.Unlock()
 
-	// If no allowed URLs configured, block everything
+	if passThrough {
+		return true
+	}
+
 	if len(allowed) == 0 {
 		return false
 	}
@@ -141,6 +256,7 @@ func (ub *URLBlocker) isAllowed(host string) bool {
 }
 
 func (ub *URLBlocker) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[proxy] 📨 REQUEST: %s %s (Host=%s, URL=%+v)", r.Method, r.RequestURI, r.Host, r.URL)
 	if r.Method == http.MethodConnect {
 		ub.handleHTTPS(w, r)
 		return
@@ -149,17 +265,18 @@ func (ub *URLBlocker) handleHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ub *URLBlocker) handleHTTPS(w http.ResponseWriter, r *http.Request) {
-	host := r.URL.Hostname()
+	host := r.Host
 	if host == "" {
-		host = r.Host
+		host = r.URL.Hostname()
 	}
 	if !ub.isAllowed(host) {
-		log.Printf("[proxy] blocked HTTPS: %s (host=%s url_host=%s)", host, r.Host, r.URL.Hostname())
+		log.Printf("[proxy] 🚫 BLOCKED HTTPS: %s", host)
 		ub.writeBlockPage(w)
 		return
 	}
 
-	// Tunnel the connection
+	log.Printf("[proxy] ✅ ALLOWED HTTPS: %s", host)
+
 	dest, err := net.DialTimeout("tcp", host, 10*time.Second)
 	if err != nil {
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
@@ -188,12 +305,13 @@ func (ub *URLBlocker) handleHTTPPlain(w http.ResponseWriter, r *http.Request) {
 		host = r.Host
 	}
 	if !ub.isAllowed(host) {
-		log.Printf("[proxy] blocked HTTP: %s (host=%s url_host=%s)", host, r.Host, r.URL.Hostname())
+		log.Printf("[proxy] 🚫 BLOCKED HTTP: %s", host)
 		ub.writeBlockPage(w)
 		return
 	}
 
-	// Forward the request
+	log.Printf("[proxy] ✅ ALLOWED HTTP: %s", host)
+
 	transport := &http.Transport{}
 	resp, err := transport.RoundTrip(r)
 	if err != nil {
@@ -210,137 +328,93 @@ func (ub *URLBlocker) handleHTTPPlain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ub *URLBlocker) writeBlockPage(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusForbidden)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
 	fmt.Fprint(w, blockPageHTML)
 }
 
-// =============================================================================
-// System Proxy Management
-// =============================================================================
+const proxyStateName = "roboty_proxy_state"
+
+func (ub *URLBlocker) saveProxyState() error {
+	if ub.stateFile == nil {
+		return nil
+	}
+	return ub.stateFile.SaveState(proxyStateName)
+}
+
+func (ub *URLBlocker) clearProxyState() {
+	if ub.stateFile == nil {
+		return
+	}
+	ub.stateFile.ClearState(proxyStateName)
+}
+
+func (ub *URLBlocker) proxyStateExists() bool {
+	if ub.stateFile == nil {
+		return false
+	}
+	return ub.stateFile.StateExists(proxyStateName)
+}
+
+func CleanupOrphanedProxy() {
+	stateFile := NewFileStateManager()
+	if !stateFile.StateExists(proxyStateName) {
+		return
+	}
+	log.Println("[proxy] ⚠️ Detected orphaned proxy state from previous crash — cleaning up")
+	stateFile.ClearState(proxyStateName)
+
+	proxyMgr := NewRealProxyManager()
+	if err := proxyMgr.Disable(); err != nil {
+		log.Printf("[proxy] ⚠️ Orphaned proxy cleanup failed: %v", err)
+	} else {
+		log.Println("[proxy] ✅ Orphaned proxy cleaned up — system proxy disabled")
+	}
+}
+
+func (ub *URLBlocker) getProxyManager() SystemProxyManager {
+	if ub.proxyMgr != nil {
+		return ub.proxyMgr
+	}
+	return NewRealProxyManager()
+}
 
 func (ub *URLBlocker) enableSystemProxy() error {
-	proxyAddr := fmt.Sprintf("127.0.0.1:%d", ub.port)
+	mgr := ub.getProxyManager()
+	err := mgr.Enable("127.0.0.1", ub.port)
+	if err == nil {
+		if saveErr := ub.saveProxyState(); saveErr != nil {
+			log.Printf("[proxy] proxy enabled but state file not written: %v", saveErr)
+		}
+		log.Printf("[proxy] 🌐 System proxy enabled -> 127.0.0.1:%d", ub.port)
+	} else {
+		log.Printf("[proxy] ⚠️ Failed to set system proxy: %v", err)
 
-	switch runtime.GOOS {
-	case "linux":
-		return ub.enableProxyLinux(proxyAddr)
-	case "darwin":
-		return ub.enableProxyMacOS(proxyAddr)
-	case "windows":
-		return ub.enableProxyWindows(proxyAddr)
+		if runtime.GOOS == "linux" && strings.Contains(err.Error(), "gsettings") {
+			log.Println("[proxy] gsettings not available — proxy setting skipped (headless/CI)")
+		}
 	}
-	return nil
+	return err
 }
 
 func (ub *URLBlocker) disableSystemProxy() error {
-	switch runtime.GOOS {
-	case "linux":
-		return ub.disableProxyLinux()
-	case "darwin":
-		return ub.disableProxyMacOS()
-	case "windows":
-		return ub.disableProxyWindows()
+	mgr := ub.getProxyManager()
+	err := mgr.Disable()
+	ub.clearProxyState()
+	if err == nil {
+		log.Println("[proxy] 🌐 System proxy disabled")
 	}
-	return nil
+	return err
 }
-
-func (ub *URLBlocker) enableProxyLinux(proxyAddr string) error {
-	cmds := [][]string{
-		{"gsettings", "set", "org.gnome.system.proxy", "mode", "manual"},
-		{"gsettings", "set", "org.gnome.system.proxy.http", "host", "127.0.0.1"},
-		{"gsettings", "set", "org.gnome.system.proxy.http", "port", fmt.Sprintf("%d", ub.port)},
-		{"gsettings", "set", "org.gnome.system.proxy.https", "host", "127.0.0.1"},
-		{"gsettings", "set", "org.gnome.system.proxy.https", "port", fmt.Sprintf("%d", ub.port)},
-	}
-	for _, args := range cmds {
-		if err := exec.Command(args[0], args[1:]...).Run(); err != nil {
-			log.Printf("[proxy] linux cmd failed: %v", err)
-		}
-	}
-	log.Println("[proxy] Linux system proxy enabled")
-	return nil
-}
-
-func (ub *URLBlocker) disableProxyLinux() error {
-	cmd := exec.Command("gsettings", "set", "org.gnome.system.proxy", "mode", "none")
-	return cmd.Run()
-}
-
-func (ub *URLBlocker) enableProxyMacOS(proxyAddr string) error {
-	// Get active network service
-	netService, err := exec.Command("networksetup", "-listallnetworkservices").Output()
-	if err != nil {
-		return fmt.Errorf("list network services: %w", err)
-	}
-	services := strings.Split(string(netService), "\n")
-	for _, s := range services {
-		s = strings.TrimSpace(s)
-		if s == "" || strings.Contains(s, "An asterisk") {
-			continue
-		}
-		exec.Command("networksetup", "-setwebproxy", s, "127.0.0.1", fmt.Sprintf("%d", ub.port)).Run()
-		exec.Command("networksetup", "-setsecurewebproxy", s, "127.0.0.1", fmt.Sprintf("%d", ub.port)).Run()
-		exec.Command("networksetup", "-setwebproxystate", s, "on").Run()
-		exec.Command("networksetup", "-setsecurewebproxystate", s, "on").Run()
-	}
-	log.Println("[proxy] macOS system proxy enabled")
-	return nil
-}
-
-func (ub *URLBlocker) disableProxyMacOS() error {
-	netService, err := exec.Command("networksetup", "-listallnetworkservices").Output()
-	if err != nil {
-		return err
-	}
-	services := strings.Split(string(netService), "\n")
-	for _, s := range services {
-		s = strings.TrimSpace(s)
-		if s == "" || strings.Contains(s, "An asterisk") {
-			continue
-		}
-		exec.Command("networksetup", "-setwebproxystate", s, "off").Run()
-		exec.Command("networksetup", "-setsecurewebproxystate", s, "off").Run()
-	}
-	log.Println("[proxy] macOS system proxy disabled")
-	return nil
-}
-
-func (ub *URLBlocker) enableProxyWindows(proxyAddr string) error {
-	psCmd := fmt.Sprintf(`Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyEnable" -Value 1 -Type DWord -Force; Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyServer" -Value "%s" -Type String -Force`, proxyAddr)
-	cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("windows proxy enable: %w - %s", err, string(out))
-	}
-	log.Println("[proxy] Windows system proxy enabled")
-	return nil
-}
-
-func (ub *URLBlocker) disableProxyWindows() error {
-	psCmd := `Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyEnable" -Value 0 -Type DWord -Force`
-	cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("windows proxy disable: %w - %s", err, string(out))
-	}
-	log.Println("[proxy] Windows system proxy disabled")
-	return nil
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
 
 func normalizeURLs(urls []string) []string {
 	normalized := make([]string, 0, len(urls))
 	for _, u := range urls {
 		u = strings.TrimSpace(u)
 		u = strings.ToLower(u)
-		// Strip protocol
 		u = strings.TrimPrefix(u, "https://")
 		u = strings.TrimPrefix(u, "http://")
-		// Strip trailing slash
 		u = strings.TrimSuffix(u, "/")
-		// Strip path
 		if idx := strings.Index(u, "/"); idx > 0 {
 			u = u[:idx]
 		}
@@ -362,7 +436,7 @@ const blockPageHTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Blocked — Roboty Focus Mode</title>
+<title>Blocked</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #0f0f1a; color: #e0e0e0; }
   .card { background: #1a1a2e; border-radius: 16px; padding: 48px; max-width: 480px; text-align: center; border: 1px solid #2a2a4a; }
@@ -374,9 +448,9 @@ const blockPageHTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
-  <div class="icon">🔒</div>
+  <div class="icon">X</div>
   <h1>Site Blocked</h1>
-  <p>This site is blocked by <strong>Roboty Focus Mode</strong>.<br>Only allowed sites can be accessed during focus sessions.</p>
+  <p>This site is blocked by Roboty Focus Mode.</p>
   <span class="badge">Focus Mode Active</span>
 </div>
 </body>

@@ -9,15 +9,30 @@ import (
 )
 
 type AppBlocker struct {
-	mu         sync.Mutex
-	running    bool
-	cancel     context.CancelFunc
-	foreground *ForegroundTracker
+	mu              sync.Mutex
+	running         bool
+	cancel          context.CancelFunc
+	foreground      ForegroundDetector
+	safetyVerifier  *KillSafetyVerifier
+	auditLogger     *SafetyAuditLogger
+	killer          ProcessKiller
 }
 
-func NewAppBlocker(tracker *ForegroundTracker) *AppBlocker {
+func NewAppBlocker(tracker ForegroundDetector) *AppBlocker {
 	return &AppBlocker{
-		foreground: tracker,
+		foreground:     tracker,
+		killer:         NewRealProcessKiller(),
+		safetyVerifier: GetGlobalSafetyVerifier(),
+		auditLogger:    NewSafetyAuditLogger(500),
+	}
+}
+
+func NewAppBlockerWithDI(tracker ForegroundDetector, killer ProcessKiller) *AppBlocker {
+	return &AppBlocker{
+		foreground:     tracker,
+		killer:         killer,
+		safetyVerifier: GetGlobalSafetyVerifier(),
+		auditLogger:    NewSafetyAuditLogger(500),
 	}
 }
 
@@ -39,11 +54,19 @@ func (ab *AppBlocker) Start(allowedExecs []string, closeOnActivate []string, int
 
 	allowedSet := make(map[string]bool)
 	for _, e := range allowedExecs {
-		allowedSet[strings.ToLower(e)] = true
+		key := strings.ToLower(strings.TrimSuffix(e, ".exe"))
+		allowedSet[key] = true
 	}
 	// Never block whitelisted system processes
+	// CRITICAL: normalize keys to match tracker output (tracker strips .exe)
 	for e := range GetWhitelistExecs() {
-		allowedSet[e] = true
+		key := strings.ToLower(strings.TrimSuffix(e, ".exe"))
+		allowedSet[key] = true
+	}
+	// Add ancestor processes (never block own parent/launcher/terminal)
+	for e := range GetAncestorExecs() {
+		key := strings.ToLower(strings.TrimSuffix(e, ".exe"))
+		allowedSet[key] = true
 	}
 
 	go func() {
@@ -72,10 +95,48 @@ func (ab *AppBlocker) Start(allowedExecs []string, closeOnActivate []string, int
 				}
 
 				execLower := strings.ToLower(activity.ExecName)
+				execKey := strings.TrimSuffix(execLower, ".exe")
 
-				if !allowedSet[execLower] {
+				if !allowedSet[execKey] {
 					log.Printf("[blocker] blocking %s (exec=%s) — not in allowed list", activity.AppName, activity.ExecName)
-					CloseApp(activity.ExecName)
+
+					// SAFETY: Normalize and verify before killing
+					safeExec := NormalizeKillExec(activity.ExecName)
+					if safeExec == "" {
+						log.Printf("[blocker] SKIP kill of %s: rejected by NormalizeKillExec", activity.ExecName)
+						ab.auditLogger.Log(SafetyEvent{
+							Type:    EventKillBlocked,
+							Target:  activity.ExecName,
+							Source:  "blocker",
+							Message: "rejected by NormalizeKillExec",
+						})
+						continue
+					}
+
+					safe, reason := ab.safetyVerifier.IsSafeToKill(safeExec)
+					if !safe {
+						log.Printf("[blocker] SAFETY BLOCKED kill of %s (exec=%s): %s", activity.AppName, activity.ExecName, reason)
+						ab.auditLogger.Log(SafetyEvent{
+							Type:    EventKillBlocked,
+							Target:  activity.ExecName,
+							Source:  "blocker-safety-verifier",
+							Message: reason,
+						})
+						continue
+					}
+
+					// Safety check passed — proceed with kill
+					ab.auditLogger.Log(SafetyEvent{
+						Type:    EventBlockedApp,
+						Target:  activity.ExecName,
+						Source:  "blocker",
+						Message: "blocked by focus mode",
+					})
+					if ab.killer != nil {
+						ab.killer.Kill(activity.ExecName, 10*time.Second)
+					} else {
+						CloseApp(activity.ExecName)
+					}
 				}
 			}
 		}

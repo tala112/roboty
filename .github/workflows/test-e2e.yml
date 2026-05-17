@@ -1,0 +1,43 @@
+name: E2E & Integration Tests
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Integration tests
+        run: go test -v -race -count=1 -tags=integration ./test/integration/...
+
+  e2e-windows:
+    runs-on: windows-latest
+    env:
+      ROBOTY_E2E: 1
+      ROBOTY_SAFE_MODE: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: E2E tests (Windows)
+        run: go test -v -tags=e2e -run TestE2E_Windows ./test/e2e/
+
+  e2e-macos:
+    runs-on: macos-latest
+    env:
+      ROBOTY_E2E: 1
+      ROBOTY_SAFE_MODE: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: E2E tests (macOS)
+        run: go test -v -tags=e2e -run TestE2E_macOS ./test/e2e/

@@ -29,6 +29,7 @@ export function ModesTab() {
   const [editMode, setEditMode] = useState(null)
   const [activeSession, setActiveSession] = useState(null)
   const [activeMode, setActiveMode] = useState(null)
+  const [error, setError] = useState(null)
 
   const loadModes = useCallback(async () => {
     try {
@@ -66,70 +67,104 @@ export function ModesTab() {
           setActiveMode(null)
           loadModes()
         }
-      } catch {
-        // ignore
+      } catch (err) {
+        console.warn("Session polling error:", err)
       }
     }, 5000)
     return () => clearInterval(interval)
   }, [activeSession, loadModes])
 
   const handleCreate = () => {
+    setError(null)
     setEditMode(null)
     setShowForm(true)
   }
 
   const handleEdit = (mode) => {
+    setError(null)
     setEditMode(mode)
     setShowForm(true)
   }
 
   const handleSave = async (data) => {
-    const { modesService } = await import("../services/modes")
-    if (data.id) {
-      await modesService.update(data)
-    } else {
-      await modesService.create(data)
+    setError(null)
+    try {
+      const { modesService } = await import("../services/modes")
+      if (data.id) {
+        await modesService.update(data)
+      } else {
+        await modesService.create(data)
+      }
+      await loadModes()
+    } catch (err) {
+      console.error("Failed to save mode:", err)
+      setError(typeof err === "string" ? err : err?.message || "Failed to save mode")
     }
-    await loadModes()
   }
 
   const handleDelete = async (id) => {
-    const { modesService } = await import("../services/modes")
-    await modesService.delete(id)
-    await loadModes()
+    setError(null)
+    try {
+      const { modesService } = await import("../services/modes")
+      await modesService.delete(id)
+      await loadModes()
+    } catch (err) {
+      console.error("Failed to delete mode:", err)
+      setError(typeof err === "string" ? err : err?.message || "Failed to delete mode")
+    }
   }
 
   const handleToggle = async (id, enabled) => {
-    const { modesService } = await import("../services/modes")
-    if (enabled) {
-      await modesService.activate(id)
-      setActiveSession(null)
-    } else if (activeSession?.mode_id === id) {
-      await modesService.deactivate(activeSession.id)
+    setError(null)
+    try {
+      const { modesService } = await import("../services/modes")
+      if (enabled) {
+        await modesService.activate(id)
+        setActiveSession(null)
+      } else if (activeSession?.mode_id === id) {
+        await modesService.deactivate(activeSession.id)
+      }
+      await loadModes()
+    } catch (err) {
+      console.error("Failed to toggle mode:", err)
+      setError(typeof err === "string" ? err : err?.message || "Failed to toggle mode")
+      await loadModes()
     }
-    await loadModes()
   }
 
   const handleActivate = async (mode) => {
-    const { modesService } = await import("../services/modes")
-    if (activeSession) {
-      await modesService.deactivate(activeSession.id)
+    setError(null)
+    try {
+      const { modesService } = await import("../services/modes")
+      if (activeSession) {
+        await modesService.deactivate(activeSession.id)
+      }
+      const session = await modesService.activate(mode.id)
+      if (session) {
+        setActiveSession(session)
+        setActiveMode(mode)
+      }
+      await loadModes()
+    } catch (err) {
+      console.error("Failed to activate mode:", err)
+      setError(typeof err === "string" ? err : err?.message || "Failed to activate mode")
+      await loadModes()
     }
-    const session = await modesService.activate(mode.id)
-    if (session) {
-      setActiveSession(session)
-      setActiveMode(mode)
-    }
-    await loadModes()
   }
 
   const handleStop = async () => {
     if (!activeSession) return
-    const { modesService } = await import("../services/modes")
-    await modesService.deactivate(activeSession.id)
-    setActiveSession(null)
-    setActiveMode(null)
-    await loadModes()
+    setError(null)
+    try {
+      const { modesService } = await import("../services/modes")
+      await modesService.deactivate(activeSession.id)
+      setActiveSession(null)
+      setActiveMode(null)
+      await loadModes()
+    } catch (err) {
+      console.error("Failed to deactivate mode:", err)
+      setError(typeof err === "string" ? err : err?.message || "Failed to deactivate mode")
+    }
   }
 
   if (loading) {
@@ -152,6 +187,12 @@ export function ModesTab() {
           New Mode
         </Button>
       </div>
+
+      {error && (
+        <div className="rounded-2xl border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {activeSession && (
         <ActiveModeIndicator
