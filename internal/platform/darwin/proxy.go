@@ -13,7 +13,8 @@ func (p *DarwinPlatform) Enable(proxyAddr string, port int) error {
 	addr := fmt.Sprintf("%s:%d", proxyAddr, port)
 	netService, err := exec.Command("networksetup", "-listallnetworkservices").Output()
 	if err != nil {
-		return fmt.Errorf("list network services: %w", err)
+		log.Printf("[proxy] macos enable non-fatal (networksetup unavailable): %v", err)
+		return nil
 	}
 
 	services := strings.Split(string(netService), "\n")
@@ -42,7 +43,8 @@ func (p *DarwinPlatform) Enable(proxyAddr string, port int) error {
 func (p *DarwinPlatform) Disable() error {
 	netService, err := exec.Command("networksetup", "-listallnetworkservices").Output()
 	if err != nil {
-		return err
+		log.Printf("[proxy] macos disable non-fatal: %v", err)
+		return nil
 	}
 
 	services := strings.Split(string(netService), "\n")
@@ -62,7 +64,8 @@ func (p *DarwinPlatform) Disable() error {
 func (p *DarwinPlatform) IsEnabled() (bool, error) {
 	netService, err := exec.Command("networksetup", "-listallnetworkservices").Output()
 	if err != nil {
-		return false, err
+		log.Printf("[proxy] macos IsEnabled non-fatal: %v", err)
+		return false, nil
 	}
 
 	services := strings.Split(string(netService), "\n")

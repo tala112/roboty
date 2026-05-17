@@ -44,7 +44,7 @@ func (p *LinuxPlatform) Enable(proxyAddr string, port int) error {
 func (p *LinuxPlatform) Disable() error {
 	cmd := exec.Command("gsettings", "set", "org.gnome.system.proxy", "mode", "none")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("disable linux proxy: %w", err)
+		log.Printf("[proxy] linux disable non-fatal: %v", err)
 	}
 	return nil
 }
@@ -52,7 +52,8 @@ func (p *LinuxPlatform) Disable() error {
 func (p *LinuxPlatform) IsEnabled() (bool, error) {
 	out, err := exec.Command("gsettings", "get", "org.gnome.system.proxy", "mode").Output()
 	if err != nil {
-		return false, err
+		log.Printf("[proxy] linux IsEnabled non-fatal: %v", err)
+		return false, nil
 	}
 	return strings.TrimSpace(string(out)) == "'manual'", nil
 }
