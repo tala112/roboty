@@ -24,13 +24,10 @@ jobs:
         run: go vet ./internal/...
       - name: Unit tests
         run: go test -count=1 -short ./internal/...
-      - name: Safety-critical tests
-        run: go test -count=1 -timeout=120s -run 'TestCritical|TestChaos|TestWhitelist' ./internal/modes/
-      - name: Whitelist sync check
-        run: go test -count=1 -timeout=30s -run TestCritical_WhitelistSyncWithSystemCritical ./internal/modes/
-      - name: Fuzz NormalizeKillExec
-        run: go test -fuzz=FuzzNormalizeKillExec -fuzztime=500x -timeout=30s ./internal/modes/
-      - name: Fuzz IsAlwaysAllowed
-        run: go test -fuzz=FuzzIsAlwaysAllowed -fuzztime=500x -timeout=30s ./internal/modes/
-      - name: Fuzz IsAllowed
-        run: go test -fuzz=FuzzIsAllowed -fuzztime=500x -timeout=30s ./internal/modes/
+      - name: Safety-critical + whitelist tests
+        run: GOMEMLIMIT=3g go test -count=1 -timeout=120s -run 'TestCritical|TestChaos|TestWhitelist' ./internal/modes/
+      - name: Fuzz tests
+        run: |
+          GOMEMLIMIT=3g go test -fuzz=FuzzNormalizeKillExec -fuzztime=500x -timeout=30s ./internal/modes/
+          GOMEMLIMIT=3g go test -fuzz=FuzzIsAlwaysAllowed -fuzztime=500x -timeout=30s ./internal/modes/
+          GOMEMLIMIT=3g go test -fuzz=FuzzIsAllowed -fuzztime=500x -timeout=30s ./internal/modes/
