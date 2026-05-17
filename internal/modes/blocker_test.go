@@ -1,6 +1,7 @@
 package modes
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -119,7 +120,7 @@ func TestListWindowsProcesses_Format(t *testing.T) {
 }
 
 func isWindows() bool {
-	return true // build tag check; this file only runs on windows in practice
+	return runtime.GOOS == "windows"
 }
 
 // Test foreground tracker dispatch (palatable)
