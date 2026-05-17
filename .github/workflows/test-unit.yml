@@ -44,7 +44,7 @@ jobs:
             echo "WARNING: no gcc found — skipping race detector, running without -race"
             go test -v -count=1 -short ./internal/...
           fi
-      - name: Safety-critical tests
+      - name: Platform safety-critical tests (ancestor protection, whitelist sync, kill safety)
         run: go test -v -count=1 -run 'TestCritical|TestChaos|TestWhitelist' ./internal/modes/
       - name: Whitelist sync check (safety.go vs whitelist.json)
         run: go test -v -count=1 -run TestCritical_WhitelistSyncWithSystemCritical ./internal/modes/

@@ -523,6 +523,13 @@ func (a *App) startup(ctx context.Context) {
 	}
 }
 
+func (a *App) shutdown(ctx context.Context) {
+	log.Println("[INFO] App shutting down — cleaning up proxy, blocker, notifications")
+	if a.modeService != nil {
+		a.modeService.EmergencyStop("app-shutdown")
+	}
+}
+
 // Greet returns a greeting for the given name
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)

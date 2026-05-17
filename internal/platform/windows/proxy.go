@@ -38,13 +38,15 @@ func (p *WindowsPlatform) Enable(proxyAddr string, port int) error {
 }
 
 func (p *WindowsPlatform) Disable() error {
-	psCmd := `Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyEnable" -Value 0 -Type DWord -Force`
+	psCmd := `Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyEnable" -Value 0 -Type DWord -Force; ` +
+		`Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyServer" -ErrorAction SilentlyContinue; ` +
+		`Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name "ProxyBypass" -ErrorAction SilentlyContinue`
 	cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("windows proxy disable: %w - %s", err, string(out))
 	}
 	notifyProxyChange()
-	log.Println("[proxy] Windows system proxy disabled")
+	log.Println("[proxy] Windows system proxy disabled and ProxyServer cleared")
 	return nil
 }
 
